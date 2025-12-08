@@ -31,6 +31,9 @@ export default function Home() {
     sti_file: null as File | null,
     gdi_file: null as File | null,
     sta_file: null as File | null,
+    test_details_summary_file: null as File | null,
+    ghost_batches_file: null as File | null,
+    misc_file: null as File | null,
   });
 
   const  handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>,fileKey: keyof typeof uploadedFiles,) => {
@@ -88,20 +91,46 @@ export default function Home() {
   const ToggleFileDropVisibility = () => {
     set_undefined_file_drop_visible(!undefined_file_drop_visible);
   }
+  const HandleUpdateGhostBatches = async () => {
+    if (!uploadedFiles.ghost_batches_file || !uploadedFiles.misc_file) {
+        alert("Please Upload Ghost Batchses file.");
+        return;
+    }
 
+
+    const form_data = new FormData();
+    form_data.append("ghost_batches_file", uploadedFiles.ghost_batches_file);
+    form_data.append("misc_file", uploadedFiles.misc_file)
+
+    try {
+        const response = await fetch('/api/test_endpoint', {
+          method: 'POST',
+          body: form_data,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || "Failed to process file.");
+        }
+
+        console.log("Successfully updated ghost batches");
+
+      } catch (error) {
+        console.error("Error in STI processing:", error);
+      }
+  };
 
   const HandleGenerateReportClick = async () => {
-    const since_date:Date = new Date(2025, 9, 15)
+    const since_date:Date = new Date(2024, 0, 1)
 
     let summary_id:number = 0;
     // if(summary_id === 0){
-    //   // Show override modal
+    //   // Show override modal If yes, delete daily summary and create a new one,If no Just cancel the operation and od nothing
     //   return;
     // }
     // const delivered_weight:number = await processStiFile(since_date, uploadedFiles.sti_file)
     // console.log("The delivered quantity is", delivered_weight)
 
-    if (!uploadedFiles.sti_file || !uploadedFiles.gdi_file || !uploadedFiles.sta_file || !uploadedFiles.current_stock_file || !uploadedFiles.processing_analysis_file) {
+    if (!uploadedFiles.sti_file || !uploadedFiles.gdi_file || !uploadedFiles.sta_file || !uploadedFiles.current_stock_file || !uploadedFiles.processing_analysis_file || !uploadedFiles.test_details_summary_file) {
         alert("Please select a file.");
         return;
     }
@@ -134,6 +163,7 @@ export default function Home() {
     formData.append("staFile", uploadedFiles.sta_file);
     formData.append("current_stock", uploadedFiles.current_stock_file);
     formData.append("processing_analysis_file", uploadedFiles.processing_analysis_file);
+    formData.append("test_details_summary_file", uploadedFiles.test_details_summary_file);
   
 
     let processing_summary_object:ProcessSummary | undefined = undefined;
@@ -293,46 +323,43 @@ export default function Home() {
 
           console.log("Successful summary creation and activity initialization:", new_activity);
           try {
-          console.log("Hello world");
-          console.log(summary_id);
-          console.log(xbs_current_stock_report);
-          console.log(new_activity);
-
-    // 1. Construct the data object
-    const dataToSend : StockActivityUpdateData = {
-        summary_id: summary_id,
-        stock_data: xbs_current_stock_report,
-    };
-
-    // Conditionally add new_activities_data if it exists
-    if (new_activity != null) {
-        dataToSend.new_activities_data = new_activity;
-    }
-
-    // 2. Send the data as JSON
-    const response = await fetch('/api/update_stock_activities', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json', // <--- REQUIRED: Tells the server to expect JSON
-        },
-        body: JSON.stringify(dataToSend), // <--- REQUIRED: Send the stringified JSON object
-    });
-
-    const result: ProcessSummary = await response.json();
-    
-    if (!response.ok) {
-        throw new Error("Failed to process Processing analysis file.");
-    }
-
-    const processing_summary = result;
-    console.log("Successfully processed Processing analysis file, grouped data:", processing_summary);
-
-} catch (error) {
-    console.error("Error in Updating stock activities:", error);
-}
           
-          // Refresh the summary on screen
-          fetchLatestStockSummary();
+
+            // 1. Construct the data object
+            const dataToSend : StockActivityUpdateData = {
+                summary_id: summary_id,
+                stock_data: xbs_current_stock_report,
+            };
+
+            // Conditionally add new_activities_data if it exists
+            if (new_activity != null) {
+                dataToSend.new_activities_data = new_activity;
+            }
+
+            // 2. Send the data as JSON
+            const response = await fetch('/api/update_stock_activities', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json', // <--- REQUIRED: Tells the server to expect JSON
+                },
+                body: JSON.stringify(dataToSend), // <--- REQUIRED: Send the stringified JSON object
+            });
+
+            const result: ProcessSummary = await response.json();
+            
+            if (!response.ok) {
+                throw new Error("Failed to process Processing analysis file.");
+            }
+
+            const processing_summary = result;
+            console.log("Successfully processed Processing analysis file, grouped data:", processing_summary);
+
+        } catch (error) {
+            console.error("Error in Updating stock activities:", error);
+        }
+                  
+        // Refresh the summary on screen
+        fetchLatestStockSummary();
 
       } catch (error) {
       console.error("Error in HandleGenerateReportClick:", error);
@@ -340,6 +367,49 @@ export default function Home() {
       } finally {
             setIsLoading(false);
       }
+      console.log("Updating undefined strategies")
+       try {
+        const response = await fetch('/api/update_undefined_strategies', {
+            method: 'POST',
+            body:formData
+        });
+        const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || "Failed to Update UNDEFINED strategies");
+            }
+
+            try {
+              const response = await fetch('/api/update_post_stacks', {
+                method: 'POST',
+                body: formData,
+              });
+
+              const result : any = await response.json();
+
+              if (!response.ok) {
+              throw new Error("Failed to Update post stacks.");
+              }
+
+            console.log("Successfully updated post stacks:", result);
+
+            // const response_test = await fetch('/api/test_endpoint', {method: 'GET'});
+
+
+            // const ghost_hunt_response = await fetch('/api/batches/ghost_hunt', {method: 'GET'})
+ 
+
+          } catch (error) {
+          console.error("Error in Updating post stacks:", error);
+          }
+          
+
+        } catch (error) {
+            console.error("Update UNDEFINED strategies:", error);
+        }
+
+
+
+      
           
     }else{
       throw new Error("missing crucial daily summary data point")
@@ -347,9 +417,9 @@ export default function Home() {
   }
      
 
-
   useEffect(() => {
     fetchLatestStockSummary();
+   
   }, []); // The empty array [] means this runs only once on mount
 
   return (
@@ -472,7 +542,31 @@ export default function Home() {
                   <h5>Loss distribution</h5>
                 </CardHeader>
                 <CardContent>
-                  <LossGainComparison />
+                  {/* <LossGainComparison /> */}
+                  <div className="grid w-full max-w-sm items-center gap-3">
+                    <Label htmlFor="ghost_batches_file">GHOST Batches</Label>
+                    <Input
+                      id="ghost_batches_file"
+                      type="file"
+                      onChange={(e) => handleFileChange(e, 'ghost_batches_file')}
+                    />
+                  </div>
+
+
+                  <div className="grid w-full max-w-sm items-center gap-3">
+                    <Label htmlFor="misc_file">Misc</Label>
+                    <Input
+                      id="misc_file"
+                      type="file"
+                      onChange={(e) => handleFileChange(e, 'misc_file')}
+                    />
+                  </div>
+
+
+
+                  <div className="grid w-full max-w-sm items-center gap-3">
+                   <Button onClick={HandleUpdateGhostBatches}>Update Ghost batches</Button>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -525,6 +619,15 @@ export default function Home() {
                       id="stock_adjustment_file"
                       type="file"
                       onChange={(e) => handleFileChange(e, 'sta_file')}
+                    />
+                  </div>
+
+                  <div className="grid w-full max-w-sm items-center gap-3">
+                    <Label htmlFor="test_details_summary">Test Details Summary report</Label>
+                    <Input
+                      id="test_details_summary"
+                      type="file"
+                      onChange={(e) => handleFileChange(e, 'test_details_summary_file')}
                     />
                   </div>
 

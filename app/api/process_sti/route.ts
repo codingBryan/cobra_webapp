@@ -6,27 +6,32 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const stiFile = formData.get('stiFile') as File | null;
-    const targetDateStr = formData.get('targetDate') as string | null;
+    const since_date_str = formData.get('targetDate') as string | null;
+    const last_instruction_date_str = formData.get('last_instruction_date') as string | null;
     const summary_id:string = formData.get("summary_id") as string;
     const current_stock_file:File | null = formData.get("current_stock") as File | null;
     const summary_id_int:number = parseInt(summary_id);
 
-    if (!stiFile || !targetDateStr) {
-      return NextResponse.json({ error: 'Missing file or date' }, { status: 400 });
+    if (!stiFile || !since_date_str) {
+      return NextResponse.json({ error: 'Missing Stock Transfer Instruction File' }, { status: 400 });
     }
 
-    const targetDate = new Date(targetDateStr);
+    let sinceDate:Date;
+    if (last_instruction_date_str != null) {
+      sinceDate = new Date(last_instruction_date_str);
+    }else{
+      sinceDate = new Date(since_date_str);
+    }
 
     // --- THIS NOW RUNS ON THE SERVER ---
     // It can access process.env and the database.
-    const total_delivered_qty = await processStiFile(targetDate, stiFile, summary_id_int,current_stock_file);
+    const total_delivered_qty = await processStiFile(sinceDate, stiFile, summary_id_int,current_stock_file);
     // ---
 
     return NextResponse.json({ total_delivered_qty }, { status: 200 });
 
   } catch (error) {
     console.error("[API Error] /api/process-sti:", error);
-    // Send a generic error message to the client
     return NextResponse.json({ error: 'An internal server error occurred.' }, { status: 500 });
   }
 }

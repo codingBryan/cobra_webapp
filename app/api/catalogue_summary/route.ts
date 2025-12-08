@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
         // --- FILTER RECORDS ---
         
         const validRecords: CatalogueRecord[] = [];
-        const failedBatchNumbers: (string | number)[] = [];
+        const failedBatchNumbers: ({batch: string | number, grade:string | null, qty:number|null})[] = [];
 
         for (const record of records) {
             // Check for required fields being null
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
             if (hasNullFinancials) {
                 // Collect the batch_number of the failed insertion
                 if (record.batch_number) {
-                    failedBatchNumbers.push(record.batch_number);
+                    failedBatchNumbers.push({batch: record.batch_number, grade:String(record.grade), qty:Number(record.weight)});
                 }
             } else {
                 validRecords.push(record);

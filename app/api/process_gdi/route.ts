@@ -6,18 +6,24 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const gdiFile = formData.get('gdiFile') as File | null;
     const current_stock_file = formData.get("current_stock")as File | null;
-    const sinceDateStr = formData.get('targetDate') as string | null;
+    const since_date_str = formData.get('targetDate') as string | null;
+    const last_outbound_date_str = formData.get('last_outbound_date') as string | null;
     const summary_id:string = formData.get("summary_id") as string;
     const summary_id_int:number = parseInt(summary_id);
 
-    if (!gdiFile || !sinceDateStr) {
+    if (!gdiFile || !since_date_str) {
       return NextResponse.json(
-        { error: 'Missing gdiFile or sinceDate' },
+        { error: 'Missing Goods Dispatch File' },
         { status: 400 }
       );
     }
 
-    const sinceDate = new Date(sinceDateStr);
+    let sinceDate:Date;
+    if (last_outbound_date_str != null) {
+      sinceDate = new Date(last_outbound_date_str);
+    }else{
+      sinceDate = new Date(since_date_str);
+    }
 
     // Call your existing function.
     // The 'processOutbounds' function is already set up to handle

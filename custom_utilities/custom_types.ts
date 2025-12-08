@@ -255,7 +255,14 @@ export interface InstructedBatch {
   transaction_number: string;
   batch_number: string;
 }
-
+export interface DailyStrategyRow extends RowDataPacket {
+    id: number;
+    strategy: string;
+    batch_number: string; // Use as ID? Or use DB ID? Prompt said "id of the row cast to string"
+    output_differential: number;
+    output_qty: number;
+    output_hedge_level_usc_lb: number;
+}
 
 export type StrategyRow = {
   'Batch No.'?: string | number;
@@ -268,6 +275,58 @@ export type UndefinedRow = {
   batch_number: string;
 };
 
+
+export interface Ingredient {
+    batchId: string;
+    batch_number:string;
+    strategy: string;
+    quantityKg: number;
+}
+
+export interface Batch {
+  id: string;
+  batch_number:string;
+  strategy: string;
+  outrightPrice50kg: number; // $/50kg
+  quantityKg: number;
+  hedgeLevelUSClb: number; // USC/lb
+  composition?: Ingredient[];
+  status?: 'active' | 'archived'; 
+}
+
+export interface StrategyAggregate {
+  name: string;
+  totalKg: number;
+  wAvgOutright50kg: number;
+  wAvgHedgeUSClb: number;
+  wAvgDiffUSClb: number;
+  batches: Batch[];
+}
+
+
+
+export interface PostStackBatchRow extends RowDataPacket {
+    id: number;
+    batch_number: string;
+    stack_type: string; // From joined post_stack table
+    price_usd_50: number;
+    quantity: number;
+    hedge_level: string; // Note: Schema says VARCHAR, frontend expects number. Need to parse.
+    diff_usc_lb: number;
+}
+
+export interface DailyProcessRow extends RowDataPacket { 
+    id: number;
+    summary_id: number;
+    processing_date: string;
+    process_type: string;
+    process_number: string;
+    input_qty: number;
+    output_qty: number;
+    milling_loss: number;
+    processing_loss_gain_qty: number;
+    trade_variables_updated: boolean;
+}
 
 /**
  * Defines the structure for a single record received from the frontend, 
@@ -340,5 +399,34 @@ export interface StrategyAdjustmentTotals extends RowDataPacket {
 export interface PreviousClosingStock extends RowDataPacket {
   xbs_closing_stock: number;
 }
+
+export interface SaleRecord {
+    id: string; 
+    contract_number:string;
+    date: string; 
+    client: string;
+    batch_number: string;
+    strategy: string;
+    packing: string;
+    quantity: number;
+    sale_fob_diff: number; // Sale FOB_Dif. - This minus the batch diff is the margin
+    cost_diff: number; // W.Avg Diff from daily_strategy_processing
+    hedge_level: number;
+    cost_usd_50: number; // From daily strategy processing
+    pnl_per_lb: number;
+    pnl_total: number;
+    is_sale_diff_null:Boolean;
+}
+
+
+
+
+export interface LastUpdateDates {
+  last_sti: Date;
+  last_sta: Date;
+  last_process: Date;
+  last_outbound: Date;
+}
+
 
 

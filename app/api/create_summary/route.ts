@@ -9,6 +9,7 @@ import {
 } from '@/lib/sti_processing_utils'; 
 import '@/lib/stock_movement_db'; 
 import { InitializedActivityRecords, ProcessSummary, StockData } from '@/custom_utilities/custom_types';
+import { update_post_trade_variables } from '@/lib/stack_pricing_utils';
 
 
 /**
@@ -99,6 +100,17 @@ export async function POST(request: NextRequest) {
 
     
     console.log(`[API] Successfully updated summary and activities for ID: ${summary_id}`);
+
+    const skipped_process_numbers = await update_post_trade_variables();
+    if (skipped_process_numbers.length < 1){
+      console.log(skipped_process_numbers)
+    }
+
+    else{
+      console.log(skipped_process_numbers)
+      console.log(`[API] Successfully updated trade variables: ${summary_id}`);
+    }
+    
     
     // Return the final updated activity list
     return NextResponse.json(updated_activity_list, { status: 200 });

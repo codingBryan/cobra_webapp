@@ -277,7 +277,6 @@ const MultiFileDropzone: React.FC<MultiFileDropzoneProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            multiple
             accept={allowedTypesString}
             className="hidden"
             onChange={handleFileSelect}
@@ -347,8 +346,8 @@ export default function FileDropZone() {
     
     const HandleCurrentStockFileUpload = async () => {
         const formData = new FormData();
-        files.forEach( async (file) => {
-        formData.append("current_stock_files", file);
+        // files.forEach( async (file) => {
+        formData.append("test_detail_file", files[0]);
 
         try {
         const response = await fetch('/api/update_undefined_strategies', {
@@ -364,7 +363,7 @@ export default function FileDropZone() {
         } catch (error) {
             console.error("Error in STI processing:", error);
         }
-    });
+    // });
     }
 
 
@@ -378,16 +377,10 @@ export default function FileDropZone() {
     return (
         <div className="bg-zinc-50 dark:bg-zinc-900 h-auto w-full">
         <div className="mx-auto flex flex-col items-center">
-            <MultiFileDropzone
-            value={files}
-            onChange={onFilesAdded}
+            <MultiFileDropzone value={files} onChange={onFilesAdded}
             />
             
-            <Button 
-            className="mt-4" 
-            onClick={HandleCurrentStockFileUpload}
-            disabled={files.length === 0}
-            >
+            <Button  className="mt-4"  onClick={HandleCurrentStockFileUpload} disabled={files.length === 0}>
             Upload {files.length} File(s)
             </Button>
         </div>

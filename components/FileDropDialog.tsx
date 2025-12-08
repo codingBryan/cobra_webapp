@@ -52,7 +52,7 @@ export function FileDropDialog(props:{file_type:string}) {
             <DialogHeader>
               <DialogTitle></DialogTitle>
               <DialogDescription>
-                Upload as many Current Stock Files (Traders or All reports)S as you can.
+                Upload Upload the most recent Test Details Summary File from XBS.
               </DialogDescription>
             </DialogHeader>
               <FileDropZone/>

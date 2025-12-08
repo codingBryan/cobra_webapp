@@ -20,7 +20,7 @@ if (process.env.ENVIRONMENT == "development") {
     user: USER,
     password: PASSWORD,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 20,
     queueLimit: 0,
   });
 }
@@ -36,7 +36,7 @@ else{
     user: USER,
     password: PASSWORD,
     waitForConnections: true,
-    connectionLimit: 10,
+    connectionLimit: 20,
     ssl: { rejectUnauthorized: true },
     queueLimit: 0,
   });
@@ -61,7 +61,6 @@ export async function query<T extends RowDataPacket[] | ResultSetHeader>({query,
   let connection:PoolConnection | undefined;
   if (pool) {
     connection = await pool.getConnection();
-    console.log("Pool connection established")
   }
 
   else{

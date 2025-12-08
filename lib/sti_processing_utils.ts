@@ -20,7 +20,13 @@ function parseSafeFloat(value: any): number {
  * Formats a JavaScript Date object into a 'YYYY-MM-DD' string for MySQL.
  */
 function formatDateForMySQL(date: Date): string {
-  return date.toISOString().split('T')[0];
+  // 1. Get the components using LOCAL time, not UTC
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed (Jan = 0)
+  const day = String(date.getDate()).padStart(2, '0');
+
+  // 2. Return strict YYYY-MM-DD format
+  return `${year}-${month}-${day}`;
 }
 
 // --- START: Timezone-Safe Date Formatter ---
@@ -195,11 +201,389 @@ async function updateStiHeaderStatuses(stiIdsToUpdate: Set<number>) {
  * @param stiFile The Excel file (File object) to process.
  * @returns A Promise resolving to the total delivered quantity for the target date.
  */
+// export async function processStiFile(
+//   targetDate: Date, 
+//   stiFile: File | null, 
+//   summary_id: number,
+//   currentStockFile: File | null // <-- NEW PARAMETER
+// ): Promise<number> {
+//   console.log("--- processStiFile START ---");
+
+//   // --- 1. Read and Parse Excel File ---
+//   console.log("[Step 1] Reading and parsing Excel file...");
+//   let allRows: StiRow[];
+//   try {
+//     let buffer: ArrayBuffer | null = null;
+//     if (stiFile != null) {
+//       buffer = await stiFile.arrayBuffer();
+//     }
+//     if (buffer === null) {
+//       console.error("[Step 1] Error: STI File is null.");
+//       throw new Error("STI File is null or empty. Please upload a valid file.");
+//     }
+
+//     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+//     const sheetName = workbook.SheetNames[0];
+//     const worksheet = workbook.Sheets[sheetName];
+
+//     if (!worksheet) {
+//       console.error("[Step 1] Error: Worksheet is invalid or empty.");
+//       throw new Error("STI file seems to be empty or workbook is invalid.");
+//     }
+    
+//     allRows = XLSX.utils.sheet_to_json<StiRow>(worksheet, { range: 1 });
+//     console.log(`[Step 1] Success. Total rows read: ${allRows.length}`);
+    
+//   } catch (error) {
+//     console.error("[Step 1] Failed to read or parse STI Excel file:", error);
+//     throw error;
+//   }
+  
+//   // --- NEW STEP 1.5: Read Stock File and create lookup map ---
+//   console.log('[Step 1.5] Reading and parsing Current Stock file...');
+//   const stockStrategyMap = new Map<string, string>();
+//   if (currentStockFile) {
+//     try {
+//       const stockBuffer = await currentStockFile.arrayBuffer();
+//       // NOTE: Assuming stock file is CSV. If it's .xlsx, this is fine.
+//       const stockWorkbook = XLSX.read(stockBuffer, { type: 'buffer' }); 
+//       const stockSheetName = stockWorkbook.SheetNames[0]; // Assuming first sheet
+//       const stockWorksheet = stockWorkbook.Sheets[stockSheetName];
+//       if (stockWorksheet) {
+//         // Read stock file (assuming header is on row 1)
+//         const stockRows = XLSX.utils.sheet_to_json<CurrentStockRow>(stockWorksheet);
+//         stockRows.forEach(row => {
+//           const batchNo = row['Batch No.']?.toString().toUpperCase();
+//           const strategy = row['Position Strategy Allocation'];
+//           if (batchNo && strategy) {
+//             stockStrategyMap.set(batchNo, strategy);
+//           }
+//         });
+//         console.log(`[Step 1.5] Built strategy map with ${stockStrategyMap.size} entries.`);
+//       }
+//     } catch (error) {
+//       console.error('[Step 1.5] Error reading current_stock_file:', error);
+//       // Continue without strategy data
+//     }
+//   } else {
+//     console.warn('[Step 1.5] No Current Stock file provided. Strategies will be "UNDEFINED".');
+//   }
+
+//   // --- NEW STEP 1.6: Augment allRows with Strategy ---
+//   allRows.forEach((row: StiRow) => {
+//     const batchNum = row['Batch No.']?.toString().toUpperCase();
+//     if (batchNum) {
+//       row['Strategy'] = stockStrategyMap.get(batchNum) || 'UNDEFINED';
+//     } else {
+//       row['Strategy'] = 'UNDEFINED';
+//     }
+//   });
+//   console.log("[Step 1.6] Augmented all STI rows with strategy data.");
+
+
+//   // --- Diagnostic Logging ---
+//   try {
+//     // --- START MODIFICATION ---
+//     const totalRows = allRows.length;
+//     const rowsToLog = allRows.slice(0, 5); // Get first 5 rows
+//     console.log("[Step 1] Logging first 5 'Transaction Date_1' values for format check:");
+//     rowsToLog.forEach((row, index) => {
+//       console.log(`  Row ${index + 1} Raw Date Value:`, row['Transaction Date_1']);
+//       console.log(`  Row ${index + 1} Found Strategy:`, row['Strategy']); // Log strategy
+//     });
+
+//     if (totalRows > 5) {
+//       const lastRowsToLog = allRows.slice(-5); // Get last 5 rows
+//       console.log("[Step 1] Logging last 5 'Transaction Date_1' values for format check:");
+//       lastRowsToLog.forEach((row, index) => {
+//         // Calculate the actual row number (1-based)
+//         const rowNum = totalRows - 5 + index + 1;
+//         console.log(`  Row ${rowNum} Raw Date Value:`, row['Transaction Date_1']);
+//         console.log(`  Row ${rowNum} Found Strategy:`, row['Strategy']); // Log strategy
+//       });
+//     }
+//     // --- END MODIFICATION ---
+//   } catch (logError) {
+//     console.error("Error during diagnostic logging:", logError);
+//   }
+//   // --- END Logging ---
+  
+//   // --- 2. Sync Existing Pending Batches (NEW) ---
+//   // This runs *before* date filtering, using the whole file
+//   let affectedStiIdsFromSync: Set<number>;
+//   try {
+//     affectedStiIdsFromSync = await syncPendingBatches(allRows);
+//   } catch (error) {
+//     console.error("[Step 2] Error during pending batch sync:", error);
+//     throw error; // Throw if this critical step fails
+//   }
+
+//   // --- 3. Filter Rows by Target Date (Was 2) ---
+//   // --- FIX: Reverted to formatDateForMySQL ---
+//   const targetDateString = formatDateForMySQL(targetDate); 
+//   console.log(`[Step 3] Filtering for target date (MySQL format): ${targetDateString}`); 
+
+//   const dateFilteredRows = allRows.filter(row => {
+//     const transactionDate = row['Transaction Date_1'] as unknown as Date;
+//     if (!transactionDate || !(transactionDate instanceof Date)) return false;
+    
+//     // --- FIX: Reverted to formatDateForMySQL ---
+//     const formattedTransactionDate = formatDateForMySQL(transactionDate); 
+//     return formattedTransactionDate >= targetDateString;
+//   });
+
+//   if (dateFilteredRows.length === 0) {
+//     console.warn(`[Step 3] No STI transactions found for date ${targetDateString}.`);
+//     // --- NEW: Still need to update statuses even if no new rows ---
+//     await updateStiHeaderStatuses(affectedStiIdsFromSync);
+//     console.log("--- processStiFile END (Exiting early after sync) ---");
+//     return 0; // Return 0 as no *new* batches were delivered
+//   }
+//   console.log(`[Step 3] Found ${dateFilteredRows.length} rows for the target date.`);
+
+//   // --- 4. Calculate Total Delivered Qty for the day (Was 3) ---
+//   const total_delivered_qty = dateFilteredRows.reduce((acc, row) => {
+//     return acc + parseSafeFloat(row['Qty._2']);
+//   }, 0);
+//   console.log(`[Step 4] Calculated Total Delivered Qty: ${total_delivered_qty}`);
+
+//   // --- 5. Get Unique STI Numbers and Aggregate STI Data (Was 4) ---
+//   console.log("[Step 5] Aggregating STI data...");
+//   const uniqueStiStrings = [...new Set(
+//     dateFilteredRows
+//       .map(row => row['Number']?.toString()) // Corrected: Was 'STI Number'
+//       .filter((s): s is string => !!s) 
+//   )];
+
+//   if (uniqueStiStrings.length === 0) {
+//     console.warn(`[Step 5] No STI Numbers found in the filtered rows for ${targetDateString}.`);
+//     // --- NEW: Still need to update statuses even if no new rows ---
+//     await updateStiHeaderStatuses(affectedStiIdsFromSync);
+//     console.log("--- processStiFile END (Exiting early after sync) ---");
+//     return total_delivered_qty;
+//   }
+//   console.log(`[Step 5] Found ${uniqueStiStrings.length} unique STI Numbers:`, uniqueStiStrings);
+  
+//   const aggregatedStis: Omit<StockTransferInstruction, 'id' | 'status'>[] = [];
+
+//   for (const stiNum of uniqueStiStrings) {
+//     const allRowsForThisSti = allRows.filter(row => row['Number']?.toString() === stiNum);
+//     if (allRowsForThisSti.length === 0) {
+//       console.warn(`[Step 5] No rows found for STI Number ${stiNum} in 'Number' column.`);
+//       continue;
+//     }
+
+//     const instructed_quantity = allRowsForThisSti.reduce((acc, r) => acc + parseSafeFloat(r['Qty.']), 0);
+//     const delivered_quantity = allRowsForThisSti.reduce((acc, r) => acc + parseSafeFloat(r['Qty._2']), 0);
+//     const loss_gain = allRowsForThisSti.reduce((acc, r) => acc + parseSafeFloat(r['Qty._3']), 0);
+    
+//     const firstRow = allRowsForThisSti[0];
+//     const instructed_date = firstRow['Date'] as unknown as Date;
+
+//     if (!instructed_date || !(instructed_date instanceof Date)) {
+//       console.warn(`[Step 5] Could not determine instructed_date for STI: ${stiNum}. Skipping this STI.`);
+//       continue;
+//     }
+    
+//     aggregatedStis.push({
+//       sti_number: stiNum,
+//       instructed_date,
+//       instructed_qty: instructed_quantity,
+//       delivered_qty: delivered_quantity,
+//       loss_gain: loss_gain,
+//     });
+//   }
+//   console.log(`[Step 5] Successfully aggregated ${aggregatedStis.length} STIs.`);
+
+//   // --- 6. Batch Update/Insert `stock_transfer_instructions` (Was 5) ---
+//   console.log(`[Step 6] Upserting ${aggregatedStis.length} STIs into database...`);
+//   try {
+//     for (const sti of aggregatedStis) {
+//       const upsertQuery = `
+//         INSERT INTO stock_transfer_instructions 
+//           (summary_id, sti_number, instructed_date, instructed_qty, delivered_qty, loss_gain)
+//         VALUES (?, ?, ?, ?, ?, ?)
+//         ON DUPLICATE KEY UPDATE
+//           summary_id = VALUES(summary_id),
+//           instructed_date = VALUES(instructed_date),
+//           instructed_qty = VALUES(instructed_qty),
+//           delivered_qty = VALUES(delivered_qty),
+//           loss_gain = VALUES(loss_gain)
+//       `;
+//       await query<ResultSetHeader>({
+//         query: upsertQuery,
+//         values: [
+//           summary_id, // <-- ADDED
+//           sti.sti_number,
+//           formatDateForMySQL(sti.instructed_date), // <-- FIX: Reverted to formatDateForMySQL
+//           sti.instructed_qty,
+//           sti.delivered_qty,
+//           sti.loss_gain
+//         ]
+//       });
+//     }
+//     console.log("[Step 6] STI upsert complete.");
+//   } catch (error) {
+//     console.error("[Step 6] Database error during STI upsert:", error);
+//     throw error;
+//   }
+
+//   // --- 7. Get STI IDs for Foreign Key Mapping (Was 6) ---
+//   console.log("[Step 7] Fetching STI IDs from database for mapping...");
+//   const stiPlaceholders = uniqueStiStrings.map(() => '?').join(',');
+//   const stiRows = await query<StockTransferInstruction[]>({
+//     query: `SELECT id, sti_number FROM stock_transfer_instructions WHERE sti_number IN (${stiPlaceholders})`,
+//     values: uniqueStiStrings
+//   });
+  
+//   const stiNumberToIdMap = new Map<string, number>();
+//   const affectedStiIdsFromUpsert = new Set<number>();
+//   if (stiRows !== undefined) {
+//       stiRows.forEach(row => {
+//       stiNumberToIdMap.set(row.sti_number, row.id);
+//       affectedStiIdsFromUpsert.add(row.id); // Add to set for final status update
+//     });
+//   }
+//   console.log(`[Step 7] Mapped ${stiNumberToIdMap.size} STI numbers to IDs.`);
+
+//   // --- 8. Process and Insert New `instructed_batches` (Was 7) ---
+//   console.log(`[Step 8] Processing ${dateFilteredRows.length} filtered rows to find new batches...`);
+//   const newBatchesToInsert: InstructedBatch[] = [];
+
+//   for (const row of dateFilteredRows) {
+//     const batch_number = row['Batch No.']?.toString();
+//     const transaction_number = row['Transaction No.']?.toString();
+//     const arrival_date = row['Transaction Date_1'] as unknown as Date;
+
+//     if (!batch_number || !transaction_number || !arrival_date || !(arrival_date instanceof Date)) {
+//       console.warn("[Step 8] Skipping batch row due to missing Batch No., Transaction No., or invalid Arrival Date.", row);
+//       continue;
+//     }
+
+//     const existingBatch = await query<RowDataPacket[]>({
+//       query: `
+//         SELECT id FROM instructed_batches 
+//         WHERE batch_number = ? AND transaction_number = ? AND arrival_date = ?
+//       `,
+//       values: [batch_number, transaction_number, formatDateForMySQL(arrival_date)] // <-- FIX: Reverted to formatDateForMySQL
+//     });
+
+//     if (existingBatch && existingBatch.length > 0) {
+//       console.log(`[Step 8] Skipping batch (already exists): B:${batch_number}, T:${transaction_number}`);
+//       continue;
+//     }
+
+//     // --- 9. Create New Batch Object (Interface Instance) (Was 8) ---
+//     const sti_number_for_row = row['Number']?.toString(); // Corrected: Was 'STI Number'
+//     if (!sti_number_for_row) {
+//         console.warn("[Step 9] Skipping batch row: STI Number is missing.", row);
+//         continue;
+//     }
+
+//     const sti_id = stiNumberToIdMap.get(sti_number_for_row);
+//     if (!sti_id) {
+//       console.warn(`[Step 9] Skipping batch row: Could not find parent STI ID for STI Number ${sti_number_for_row}.`, row);
+//       continue;
+//     }
+
+//     const delivered_qty = parseSafeFloat(row['Qty._2']);
+//     const status_val = row['Stock Transfer Status'];
+//     let status: string;
+
+//     if (status_val === 'Completed') {
+//       status = 'completed';
+//     } else if (status_val === 'Pending' && delivered_qty > 0) {
+//       status = 'partially_delivered';
+//     } else if (status_val === 'Pending' && delivered_qty <= 0) {
+//       status = 'fully_pending';
+//     } else {
+//       status = 'Pending'; // Default fallback
+//     }
+    
+//     // --- Reverted Due Date Logic ---
+//     const due_date = row['Storage Due Date'] as unknown as Date;
+//     // --- END: Reverted Due Date Logic ---
+
+//     const newBatch: InstructedBatch = {
+//       sti_id: sti_id,
+//       grade: row['Item Name'] || 'UNKNOWN',
+//       strategy: row['Strategy'] || 'UNDEFINED', // <-- USE THE AUGMENTED STRATEGY
+//       instructed_qty: parseSafeFloat(row['Qty.']),
+//       delivered_qty: delivered_qty,
+//       balance_to_transfer: parseSafeFloat(row['Qty._5']),
+//       loss_gain_qty: parseSafeFloat(row['Qty._3']),
+//       status: status,
+//       // --- START FIX: Corrected the column name case ---
+//       from_location: row['From WareHouse - Zone'] || 'UNDEFINED', // Was 'From Warehouse - Zone'
+//       // --- END FIX ---
+//       due_date: (due_date instanceof Date) ? due_date : null, // Use the value from the column
+//       arrival_date: arrival_date,
+//       transaction_number: transaction_number,
+//       batch_number: batch_number,
+//     };
+    
+//     newBatchesToInsert.push(newBatch);
+//   }
+//   console.log(`[Step 9] Found ${newBatchesToInsert.length} new batches to insert.`);
+
+//   // --- 10. Batch Insert New Batches (if any) (Was 9) ---
+//   if (newBatchesToInsert.length > 0) {
+//     console.log(`[Step 10] Inserting ${newBatchesToInsert.length} new instructed batches...`);
+//     try {
+//       const insertQuery = `
+//         INSERT INTO instructed_batches (
+//           summary_id, sti_id, grade, strategy, instructed_qty, delivered_qty, balance_to_transfer, 
+//           loss_gain_qty, status, from_location, due_date, arrival_date, 
+//           transaction_number, batch_number
+//         ) VALUES ?
+//       `; // <-- ADDED 'strategy'
+//       const values = newBatchesToInsert.map((batch) => [
+//         summary_id,
+//         batch.sti_id,
+//         batch.grade,
+//         batch.strategy.toUpperCase(),
+//         batch.instructed_qty,
+//         batch.delivered_qty,
+//         batch.balance_to_transfer,
+//         batch.loss_gain_qty,
+//         batch.status,
+//         batch.from_location,
+//         batch.due_date ? formatDateForMySQL(batch.due_date) : null,
+//         formatDateForMySQL(batch.arrival_date), // <-- FIX: Reverted to formatDateForMySQL
+//         batch.transaction_number,
+//         batch.batch_number,
+//       ]);
+
+//       // Pass the 2D 'values' array wrapped in an outer array
+//       await query<ResultSetHeader>({ query: insertQuery, values: [values] });
+      
+//       console.log(`[Step 10] Successfully inserted ${newBatchesToInsert.length} new instructed batches.`);
+
+//     } catch (error) {
+//       console.error("[Step 10] Database error during batch insert of instructed batches:", error);
+//       throw error;
+//     }
+//   } else {
+//     console.log("[Step 10] No new instructed batches found to insert.");
+//   }
+
+//   // --- 11. Update all affected STI Header statuses (NEW) ---
+//   // Combine STIs updated during the sync AND STIs that just had new batches added
+//   const allAffectedStiIds = new Set([...affectedStiIdsFromSync, ...affectedStiIdsFromUpsert]);
+//   await updateStiHeaderStatuses(allAffectedStiIds);
+
+//   // --- 12. Return the total delivered qty for the day (Was 10) ---
+//   console.log(`[Step 12] Returning total delivered quantity: ${total_delivered_qty}`);
+//   console.log("--- processStiFile END ---");
+//   return total_delivered_qty;
+// }
+
+
 export async function processStiFile(
   targetDate: Date, 
   stiFile: File | null, 
   summary_id: number,
-  currentStockFile: File | null // <-- NEW PARAMETER
+  currentStockFile: File | null
 ): Promise<number> {
   console.log("--- processStiFile START ---");
 
@@ -233,18 +617,16 @@ export async function processStiFile(
     throw error;
   }
   
-  // --- NEW STEP 1.5: Read Stock File and create lookup map ---
+  // --- Step 1.5: Read Stock File and create lookup map ---
   console.log('[Step 1.5] Reading and parsing Current Stock file...');
   const stockStrategyMap = new Map<string, string>();
   if (currentStockFile) {
     try {
       const stockBuffer = await currentStockFile.arrayBuffer();
-      // NOTE: Assuming stock file is CSV. If it's .xlsx, this is fine.
       const stockWorkbook = XLSX.read(stockBuffer, { type: 'buffer' }); 
-      const stockSheetName = stockWorkbook.SheetNames[0]; // Assuming first sheet
+      const stockSheetName = stockWorkbook.SheetNames[0];
       const stockWorksheet = stockWorkbook.Sheets[stockSheetName];
       if (stockWorksheet) {
-        // Read stock file (assuming header is on row 1)
         const stockRows = XLSX.utils.sheet_to_json<CurrentStockRow>(stockWorksheet);
         stockRows.forEach(row => {
           const batchNo = row['Batch No.']?.toString().toUpperCase();
@@ -257,63 +639,70 @@ export async function processStiFile(
       }
     } catch (error) {
       console.error('[Step 1.5] Error reading current_stock_file:', error);
-      // Continue without strategy data
     }
   } else {
     console.warn('[Step 1.5] No Current Stock file provided. Strategies will be "UNDEFINED".');
   }
 
-  // --- NEW STEP 1.6: Augment allRows with Strategy ---
+  // --- Step 1.6: Augment Strategy AND Apply Timezone Fix ---
+  // Optimization: Combined logic into single loop to avoid iterating twice
   allRows.forEach((row: StiRow) => {
+    // 1. Strategy Assignment
     const batchNum = row['Batch No.']?.toString().toUpperCase();
     if (batchNum) {
       row['Strategy'] = stockStrategyMap.get(batchNum) || 'UNDEFINED';
     } else {
       row['Strategy'] = 'UNDEFINED';
     }
+
+    // 2. Date Correction (The Noon Fix)
+    // Adds 12 hours to prevent midnight timezone drift backdating to previous day
+    const dateFields = ['Transaction Date_1', 'Date', 'Storage Due Date'];
+    dateFields.forEach(field => {
+        // @ts-ignore
+        const val = row[field]; 
+        if (val && val instanceof Date) {
+            val.setTime(val.getTime() + (12 * 60 * 60 * 1000));
+        }
+    });
   });
-  console.log("[Step 1.6] Augmented all STI rows with strategy data.");
+  console.log("[Step 1.6] Augmented rows with strategy and applied 'Noon Fix' to dates.");
 
 
   // --- Diagnostic Logging ---
   try {
-    // --- START MODIFICATION ---
     const totalRows = allRows.length;
-    const rowsToLog = allRows.slice(0, 5); // Get first 5 rows
+    const rowsToLog = allRows.slice(0, 5); 
     console.log("[Step 1] Logging first 5 'Transaction Date_1' values for format check:");
     rowsToLog.forEach((row, index) => {
       console.log(`  Row ${index + 1} Raw Date Value:`, row['Transaction Date_1']);
-      console.log(`  Row ${index + 1} Found Strategy:`, row['Strategy']); // Log strategy
+      console.log(`  Row ${index + 1} Found Strategy:`, row['Strategy']); 
     });
 
     if (totalRows > 5) {
-      const lastRowsToLog = allRows.slice(-5); // Get last 5 rows
+      const lastRowsToLog = allRows.slice(-5);
       console.log("[Step 1] Logging last 5 'Transaction Date_1' values for format check:");
       lastRowsToLog.forEach((row, index) => {
-        // Calculate the actual row number (1-based)
         const rowNum = totalRows - 5 + index + 1;
         console.log(`  Row ${rowNum} Raw Date Value:`, row['Transaction Date_1']);
-        console.log(`  Row ${rowNum} Found Strategy:`, row['Strategy']); // Log strategy
+        console.log(`  Row ${rowNum} Found Strategy:`, row['Strategy']);
       });
     }
-    // --- END MODIFICATION ---
   } catch (logError) {
     console.error("Error during diagnostic logging:", logError);
   }
-  // --- END Logging ---
   
-  // --- 2. Sync Existing Pending Batches (NEW) ---
-  // This runs *before* date filtering, using the whole file
+  // --- 2. Sync Existing Pending Batches ---
   let affectedStiIdsFromSync: Set<number>;
   try {
     affectedStiIdsFromSync = await syncPendingBatches(allRows);
   } catch (error) {
     console.error("[Step 2] Error during pending batch sync:", error);
-    throw error; // Throw if this critical step fails
+    throw error; 
   }
 
-  // --- 3. Filter Rows by Target Date (Was 2) ---
-  // --- FIX: Reverted to formatDateForMySQL ---
+  // --- 3. Filter Rows by Target Date ---
+  // Ensure you are using the FIXED formatDateForMySQL (Local Time version)
   const targetDateString = formatDateForMySQL(targetDate); 
   console.log(`[Step 3] Filtering for target date (MySQL format): ${targetDateString}`); 
 
@@ -321,37 +710,34 @@ export async function processStiFile(
     const transactionDate = row['Transaction Date_1'] as unknown as Date;
     if (!transactionDate || !(transactionDate instanceof Date)) return false;
     
-    // --- FIX: Reverted to formatDateForMySQL ---
     const formattedTransactionDate = formatDateForMySQL(transactionDate); 
-    return formattedTransactionDate === targetDateString;
+    return formattedTransactionDate >= targetDateString;
   });
 
   if (dateFilteredRows.length === 0) {
     console.warn(`[Step 3] No STI transactions found for date ${targetDateString}.`);
-    // --- NEW: Still need to update statuses even if no new rows ---
     await updateStiHeaderStatuses(affectedStiIdsFromSync);
     console.log("--- processStiFile END (Exiting early after sync) ---");
-    return 0; // Return 0 as no *new* batches were delivered
+    return 0; 
   }
   console.log(`[Step 3] Found ${dateFilteredRows.length} rows for the target date.`);
 
-  // --- 4. Calculate Total Delivered Qty for the day (Was 3) ---
+  // --- 4. Calculate Total Delivered Qty for the day ---
   const total_delivered_qty = dateFilteredRows.reduce((acc, row) => {
     return acc + parseSafeFloat(row['Qty._2']);
   }, 0);
   console.log(`[Step 4] Calculated Total Delivered Qty: ${total_delivered_qty}`);
 
-  // --- 5. Get Unique STI Numbers and Aggregate STI Data (Was 4) ---
+  // --- 5. Get Unique STI Numbers and Aggregate STI Data ---
   console.log("[Step 5] Aggregating STI data...");
   const uniqueStiStrings = [...new Set(
     dateFilteredRows
-      .map(row => row['Number']?.toString()) // Corrected: Was 'STI Number'
+      .map(row => row['Number']?.toString()) 
       .filter((s): s is string => !!s) 
   )];
 
   if (uniqueStiStrings.length === 0) {
     console.warn(`[Step 5] No STI Numbers found in the filtered rows for ${targetDateString}.`);
-    // --- NEW: Still need to update statuses even if no new rows ---
     await updateStiHeaderStatuses(affectedStiIdsFromSync);
     console.log("--- processStiFile END (Exiting early after sync) ---");
     return total_delivered_qty;
@@ -389,7 +775,7 @@ export async function processStiFile(
   }
   console.log(`[Step 5] Successfully aggregated ${aggregatedStis.length} STIs.`);
 
-  // --- 6. Batch Update/Insert `stock_transfer_instructions` (Was 5) ---
+  // --- 6. Batch Update/Insert `stock_transfer_instructions` ---
   console.log(`[Step 6] Upserting ${aggregatedStis.length} STIs into database...`);
   try {
     for (const sti of aggregatedStis) {
@@ -407,9 +793,9 @@ export async function processStiFile(
       await query<ResultSetHeader>({
         query: upsertQuery,
         values: [
-          summary_id, // <-- ADDED
+          summary_id, 
           sti.sti_number,
-          formatDateForMySQL(sti.instructed_date), // <-- FIX: Reverted to formatDateForMySQL
+          formatDateForMySQL(sti.instructed_date), 
           sti.instructed_qty,
           sti.delivered_qty,
           sti.loss_gain
@@ -422,7 +808,7 @@ export async function processStiFile(
     throw error;
   }
 
-  // --- 7. Get STI IDs for Foreign Key Mapping (Was 6) ---
+  // --- 7. Get STI IDs for Foreign Key Mapping ---
   console.log("[Step 7] Fetching STI IDs from database for mapping...");
   const stiPlaceholders = uniqueStiStrings.map(() => '?').join(',');
   const stiRows = await query<StockTransferInstruction[]>({
@@ -435,12 +821,12 @@ export async function processStiFile(
   if (stiRows !== undefined) {
       stiRows.forEach(row => {
       stiNumberToIdMap.set(row.sti_number, row.id);
-      affectedStiIdsFromUpsert.add(row.id); // Add to set for final status update
+      affectedStiIdsFromUpsert.add(row.id); 
     });
   }
   console.log(`[Step 7] Mapped ${stiNumberToIdMap.size} STI numbers to IDs.`);
 
-  // --- 8. Process and Insert New `instructed_batches` (Was 7) ---
+  // --- 8. Process and Insert New `instructed_batches` ---
   console.log(`[Step 8] Processing ${dateFilteredRows.length} filtered rows to find new batches...`);
   const newBatchesToInsert: InstructedBatch[] = [];
 
@@ -459,7 +845,7 @@ export async function processStiFile(
         SELECT id FROM instructed_batches 
         WHERE batch_number = ? AND transaction_number = ? AND arrival_date = ?
       `,
-      values: [batch_number, transaction_number, formatDateForMySQL(arrival_date)] // <-- FIX: Reverted to formatDateForMySQL
+      values: [batch_number, transaction_number, formatDateForMySQL(arrival_date)]
     });
 
     if (existingBatch && existingBatch.length > 0) {
@@ -467,8 +853,8 @@ export async function processStiFile(
       continue;
     }
 
-    // --- 9. Create New Batch Object (Interface Instance) (Was 8) ---
-    const sti_number_for_row = row['Number']?.toString(); // Corrected: Was 'STI Number'
+    // --- 9. Create New Batch Object ---
+    const sti_number_for_row = row['Number']?.toString(); 
     if (!sti_number_for_row) {
         console.warn("[Step 9] Skipping batch row: STI Number is missing.", row);
         continue;
@@ -491,26 +877,22 @@ export async function processStiFile(
     } else if (status_val === 'Pending' && delivered_qty <= 0) {
       status = 'fully_pending';
     } else {
-      status = 'Pending'; // Default fallback
+      status = 'Pending'; 
     }
     
-    // --- Reverted Due Date Logic ---
     const due_date = row['Storage Due Date'] as unknown as Date;
-    // --- END: Reverted Due Date Logic ---
 
     const newBatch: InstructedBatch = {
       sti_id: sti_id,
       grade: row['Item Name'] || 'UNKNOWN',
-      strategy: row['Strategy'] || 'UNDEFINED', // <-- USE THE AUGMENTED STRATEGY
+      strategy: row['Strategy'] || 'UNDEFINED', 
       instructed_qty: parseSafeFloat(row['Qty.']),
       delivered_qty: delivered_qty,
       balance_to_transfer: parseSafeFloat(row['Qty._5']),
       loss_gain_qty: parseSafeFloat(row['Qty._3']),
       status: status,
-      // --- START FIX: Corrected the column name case ---
-      from_location: row['From WareHouse - Zone'] || 'UNDEFINED', // Was 'From Warehouse - Zone'
-      // --- END FIX ---
-      due_date: (due_date instanceof Date) ? due_date : null, // Use the value from the column
+      from_location: row['From WareHouse - Zone'] || 'UNDEFINED',
+      due_date: (due_date instanceof Date) ? due_date : null,
       arrival_date: arrival_date,
       transaction_number: transaction_number,
       batch_number: batch_number,
@@ -520,7 +902,7 @@ export async function processStiFile(
   }
   console.log(`[Step 9] Found ${newBatchesToInsert.length} new batches to insert.`);
 
-  // --- 10. Batch Insert New Batches (if any) (Was 9) ---
+  // --- 10. Batch Insert New Batches (if any) ---
   if (newBatchesToInsert.length > 0) {
     console.log(`[Step 10] Inserting ${newBatchesToInsert.length} new instructed batches...`);
     try {
@@ -530,25 +912,24 @@ export async function processStiFile(
           loss_gain_qty, status, from_location, due_date, arrival_date, 
           transaction_number, batch_number
         ) VALUES ?
-      `; // <-- ADDED 'strategy'
+      `; 
       const values = newBatchesToInsert.map((batch) => [
-        summary_id, // <-- ADDED
+        summary_id,
         batch.sti_id,
         batch.grade,
-        batch.strategy, // <-- ADDED
+        batch.strategy.toUpperCase(),
         batch.instructed_qty,
         batch.delivered_qty,
         batch.balance_to_transfer,
         batch.loss_gain_qty,
         batch.status,
         batch.from_location,
-        batch.due_date ? formatDateForMySQL(batch.due_date) : null, // <-- FIX: Reverted to formatDateForMySQL
-        formatDateForMySQL(batch.arrival_date), // <-- FIX: Reverted to formatDateForMySQL
+        batch.due_date ? batch.due_date : null,
+        formatDateForMySQL(batch.arrival_date), 
         batch.transaction_number,
         batch.batch_number,
       ]);
 
-      // Pass the 2D 'values' array wrapped in an outer array
       await query<ResultSetHeader>({ query: insertQuery, values: [values] });
       
       console.log(`[Step 10] Successfully inserted ${newBatchesToInsert.length} new instructed batches.`);
@@ -561,12 +942,11 @@ export async function processStiFile(
     console.log("[Step 10] No new instructed batches found to insert.");
   }
 
-  // --- 11. Update all affected STI Header statuses (NEW) ---
-  // Combine STIs updated during the sync AND STIs that just had new batches added
+  // --- 11. Update all affected STI Header statuses ---
   const allAffectedStiIds = new Set([...affectedStiIdsFromSync, ...affectedStiIdsFromUpsert]);
   await updateStiHeaderStatuses(allAffectedStiIds);
 
-  // --- 12. Return the total delivered qty for the day (Was 10) ---
+  // --- 12. Return the total delivered qty ---
   console.log(`[Step 12] Returning total delivered quantity: ${total_delivered_qty}`);
   console.log("--- processStiFile END ---");
   return total_delivered_qty;
@@ -647,14 +1027,14 @@ export async function processOutbounds(
   
   console.log('--- processOutbounds START ---');
 
-  // --- NEW STEP 1: Read Stock File and create lookup map ---
+  // --- NEW STEP 1a: Read Stock File and create lookup map ---
   console.log('[Step 1a] Reading and parsing Current Stock file...');
   const stockStrategyMap = new Map<string, string>();
   if (currentStockFile) {
     try {
       const stockBuffer = await currentStockFile.arrayBuffer();
       const stockWorkbook = XLSX.read(stockBuffer, { type: 'buffer' });
-      const stockSheetName = stockWorkbook.SheetNames[0]; // Assuming first sheet
+      const stockSheetName = stockWorkbook.SheetNames[0]; 
       const stockWorksheet = stockWorkbook.Sheets[stockSheetName];
       if (stockWorksheet) {
         const stockRows = XLSX.utils.sheet_to_json<CurrentStockRow>(stockWorksheet);
@@ -669,13 +1049,12 @@ export async function processOutbounds(
       }
     } catch (error) {
       console.error('[Step 1a] Error reading current_stock_file:', error);
-      // Continue without strategy data
     }
   } else {
     console.warn('[Step 1a] No Current Stock file provided. Strategies will be "UNDEFINED".');
   }
 
-  // --- 1. Read and Parse Excel File ---
+  // --- 1b. Read and Parse GDI Excel File ---
   console.log('[Step 1b] Reading and parsing GDI file...');
   let allRows: GdiRow[];
   try {
@@ -688,13 +1067,13 @@ export async function processOutbounds(
       throw new Error('GDI File is null or empty. Please upload a valid file.');
     }
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-    const sheetName = workbook.SheetNames[0]; // Assuming first sheet
+    const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) {
       console.error('[Step 1b] Error: Worksheet is invalid or empty.');
       throw new Error('GDI file seems to be empty or workbook is invalid.');
     }
-    // Use range: 1 to set the second row as the header
+    
     allRows = XLSX.utils.sheet_to_json(worksheet, { range: 1 });
     console.log(`[Step 1b] Success. Total rows read: ${allRows.length}`);
   } catch (error) {
@@ -702,15 +1081,31 @@ export async function processOutbounds(
     throw error;
   }
 
+  // --- 1c. APPLY TIMEZONE FIX (The Noon Strategy) ---
+  // We iterate ONCE to fix the dates before any filtering happens.
+  console.log('[Step 1c] Applying timezone fix to DC Date...');
+  allRows.forEach((row) => {
+    // @ts-ignore
+    const val = row['DC Date'];
+    if (val && val instanceof Date) {
+        // Add 12 hours (in milliseconds) to push date to Noon
+        val.setTime(val.getTime() + (12 * 60 * 60 * 1000));
+    }
+  });
+
   // --- 2. Filter Rows by Target Date ---
-  const sinceDateMidnight = new Date(sinceDate.setHours(0, 0, 0, 0));
+  // Note: ensure sinceDate is treated as start of day for comparison
+  const sinceDateMidnight = new Date(sinceDate);
+  sinceDateMidnight.setHours(0, 0, 0, 0);
+  
   console.log(`[Step 2] Filtering for rows with 'DC Date' on or after ${formatDateAsLocal_YYYYMMDD(sinceDateMidnight)}`);
   
   const dateFilteredRows = allRows.filter(function (row: GdiRow) {
       const dcDate = row['DC Date'] as unknown as Date;
       if (!dcDate || !(dcDate instanceof Date)) return false;
-      // Filter for rows with DC Date values same as or later than that date
-      return dcDate >= sinceDateMidnight;
+      
+      // Compare timestamps to ensure accuracy
+      return dcDate.getTime() >= sinceDateMidnight.getTime();
   });
 
   console.log(`[Step 2] Found ${dateFilteredRows.length} rows on or after the target date.`);
@@ -731,9 +1126,8 @@ export async function processOutbounds(
     const dispatch_dc_numbers = row['DC No.']?.toString();
     const dispatched_grade = row['Item Code_1']?.toString();
     const dispatch_date = row['DC Date'] as unknown as Date;
-    const batch_number = row['Batch No.']?.toString(); // <-- Get batch number
+    const batch_number = row['Batch No.']?.toString(); 
 
-    // Check if all unique keys are present
     if (!ticket_numbers ||
         !dispatch_number ||
         !dispatch_dc_numbers ||
@@ -764,12 +1158,10 @@ export async function processOutbounds(
         // --- 4. Does not exist. Create and insert new record ---
         newDispatchesCount++;
 
-  
         let strategy = 'UNDEFINED';
         if (batch_number) {
           strategy = stockStrategyMap.get(batch_number.toUpperCase()) || 'UNDEFINED';
         }
-        // --- END: MODIFIED LOGIC ---
 
         const newOutbound: OutboundRow = {
             dispatch_date: dispatch_date,
@@ -777,17 +1169,18 @@ export async function processOutbounds(
             dispatch_number: dispatch_number,
             dispatched_grade: dispatched_grade,
             dispatched_quantity: parseSafeFloat(row['Qty.']),
-            dispatched_strategy: strategy, // <-- Use looked-up strategy
+            dispatched_strategy: strategy, 
             ticket_numbers: ticket_numbers,
-            batch_number: batch_number || 'N/A', // Ensure it's a string
+            batch_number: batch_number || 'N/A', 
         };
 
         const insertQuery = "INSERT INTO daily_outbounds (summary_id, dispatch_date, dispatch_dc_numbers, dispatch_number, dispatched_grade, dispatched_quantity, dispatched_strategy, ticket_numbers, batch_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ";
+        
         insertPromises.push(query({
             query: insertQuery,
             values: [
                 summary_id,
-                formatDateAsLocal_YYYYMMDD(newOutbound.dispatch_date),
+                formatDateAsLocal_YYYYMMDD(newOutbound.dispatch_date), // Ensure this helper uses .getFullYear() etc
                 newOutbound.dispatch_dc_numbers,
                 newOutbound.dispatch_number,
                 newOutbound.dispatched_grade,
@@ -1149,7 +1542,7 @@ export async function processAdjustments(
             formatDateAsLocal_YYYYMMDD(newAdjustment.adjustment_date),
             newAdjustment.grade,
             newAdjustment.adjusted_quantity,
-            newAdjustment.strategy,
+            newAdjustment.strategy.toUpperCase(),
             newAdjustment.batch_number,
             newAdjustment.reason,
           ],
@@ -1472,9 +1865,9 @@ export async function getProcessDetails(
       issue_date: firstRow['Issue Date'] as unknown as Date,
       processing_date: firstRow['Receipt Date'] as unknown as Date,
       input_item_names: {},
-      input_batches: {}, // MODIFIED: Will hold { strategy, quantity }
+      input_batches: {},
       output_item_names: {},
-      output_batches: {}, // MODIFIED: Will hold { strategy, quantity }
+      output_batches: {}, 
       processing_loss: processing_loss, 
       milling_loss: milling_loss,       
     };
@@ -1746,7 +2139,7 @@ export async function initialize_grade_strategy_activity_records(
                 WHERE strategy = ? 
                 ORDER BY date DESC 
                 LIMIT 1`,
-        values: [strategy]
+        values: [strategy.toUpperCase()]
       });
 
       if (prevStockResult!= undefined && prevStockResult.length > 0) {
@@ -1760,7 +2153,7 @@ export async function initialize_grade_strategy_activity_records(
     new_strategy_activity.push({
       summary_id: summary_id,
       date: summaryDateString,
-      strategy: strategy,
+      strategy: strategy.toUpperCase(),
       opening_qty: opening_qty,
       xbs_closing_stock: closing_balance,
       // Set all other activity fields to 0 per your instructions
@@ -1782,6 +2175,7 @@ export async function initialize_grade_strategy_activity_records(
   };
 }
 
+
 export async function debit_credit_processing(
   new_activity_list: InitializedActivityRecords,
   summary_id: number,
@@ -1794,220 +2188,257 @@ export async function debit_credit_processing(
   // ---
 
   if (!processing_summaries || typeof processing_summaries.length !== 'number') {
-    console.error("[DEBIT/CREDIT] Error: 'processing_summaries' is not an iterable array.", processing_summary_object);
-    return new_activity_list; // Return the original list
+      console.error("[DEBIT/CREDIT] Error: 'processing_summaries' is not an iterable array.", processing_summary_object);
+      return new_activity_list; 
   }
   
   console.log(`[DEBIT/CREDIT] Starting processing for ${processing_summaries.length} processes...`);
 
-  // --- Main loop for each process (e.g., Milling, Sorting) ---
+  // --- Main loop for each process ---
   for (const process_object of processing_summaries) { 
-    
-    // --- 1. Calculate parent process totals ---
-    // Recalculate total input from the new batch structure
-    const total_process_input_qty = Object.values(process_object.input_batches).reduce((acc, batch) => acc + batch.quantity, 0);
-    const total_process_output_qty = Object.values(process_object.output_batches).reduce((acc, batch) => acc + batch.quantity, 0);
-    
-    const milling_loss = parseSafeFloat(process_object.milling_loss);
-    const processing_loss = parseSafeFloat(process_object.processing_loss);
-    const total_process_loss = milling_loss + processing_loss;
+      
+      // --- 1. Calculate parent process totals ---
+      const total_process_input_qty = Object.values(process_object.input_batches).reduce((acc, batch) => acc + batch.quantity, 0);
+      const total_process_output_qty = Object.values(process_object.output_batches).reduce((acc, batch) => acc + batch.quantity, 0);
+      
+      const milling_loss = parseSafeFloat(process_object.milling_loss);
+      const processing_loss = parseSafeFloat(process_object.processing_loss);
+      const total_process_loss = milling_loss + processing_loss; 
 
-    console.log(`[DEBIT/CREDIT] Processing Process No: ${process_object.process_number}`);
-    console.log(`  -> Total Input: ${total_process_input_qty}, Total Output: ${total_process_output_qty}, Total Loss: ${total_process_loss}`);
+      console.log(`[DEBIT/CREDIT] Processing Process No: ${process_object.process_number}`);
+      console.log(`  -> Total Input: ${total_process_input_qty}, Total Output: ${total_process_output_qty}, Total Loss: ${total_process_loss}`);
 
-    // --- 2. Create the parent 'daily_processes' row ---
-    const processInsertQuery = `
-      INSERT INTO daily_processes (
-        summary_id, processing_date, process_type, process_number,
-        input_qty, output_qty, milling_loss, processing_loss_gain_qty
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    
-    let new_process_id: number=0;
-    try {
-      const result = await query<ResultSetHeader>({
-        query: processInsertQuery,
-        values: [
-          summary_id,
-          // --- FIX: Convert string back to Date before formatting ---
-          process_object.processing_date ? formatDateAsLocal_YYYYMMDD(new Date(process_object.processing_date)) : null,
-          process_object.process_type,
-          process_object.process_number,
-          total_process_input_qty,
-          total_process_output_qty,
-          milling_loss,
-          processing_loss
-        ]
-      });
-      if (result) {
-        new_process_id = result.insertId;
+      // --- 2. Create the parent 'daily_processes' row ---
+      // FIX: Added input_value, output_value, pnl, and trade_variables_updated columns
+      // Initialized them to 0 and FALSE respectively.
+      const processInsertQuery = `
+        INSERT INTO daily_processes (
+          summary_id, processing_date, process_type, process_number,
+          input_qty, output_qty, milling_loss, processing_loss_gain_qty,
+          input_value, output_value, pnl, trade_variables_updated
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, FALSE)
+        ON DUPLICATE KEY UPDATE
+          summary_id = VALUES(summary_id),
+          processing_date = VALUES(processing_date),
+          process_type = VALUES(process_type),
+          input_qty = VALUES(input_qty),
+          output_qty = VALUES(output_qty),
+          milling_loss = VALUES(milling_loss),
+          processing_loss_gain_qty = VALUES(processing_loss_gain_qty),
+          input_value = 0,
+          output_value = 0,
+          pnl = 0,
+          trade_variables_updated = FALSE
+      `;
+      
+      // Note on UPDATE above: We reset values to 0 and trade_variables_updated to FALSE
+      // so that if you re-upload a file, the financial calculator knows it needs to re-run.
+
+      let new_process_id: number = 0;
+      let is_new_insert: boolean = false; 
+      
+      // --- TIMEZONE FIX START ---
+      let safeProcessDate = null;
+      if (process_object.processing_date) {
+        const d = new Date(process_object.processing_date);
+        d.setTime(d.getTime() + (12 * 60 * 60 * 1000));
+        safeProcessDate = formatDateAsLocal_YYYYMMDD(d);
       }
-      
-      console.log(`  -> Created 'daily_processes' row with ID: ${new_process_id}`);
-    } catch (error) {
-      console.error(`[DEBIT/CREDIT] Failed to create 'daily_processes' row for ${process_object.process_number}. Skipping this process.`, error);
-      continue; // Skip to the next process
-    }
+      // --- TIMEZONE FIX END ---
 
-    // --- 3. START: MODIFIED GRADE LOGIC ---
-    const grade_processing_rows_to_insert = [];
-
-    // Get a unique set of all grades involved (both inputs and outputs)
-    const all_grades_in_process = new Set([
-      ...Object.keys(process_object.input_item_names),
-      ...Object.keys(process_object.output_item_names)
-    ]);
-
-    console.log(`  -> Found ${all_grades_in_process.size} unique grades for this process.`);
-
-    // Loop through the combined set of all grades
-    for (const grade of all_grades_in_process) {
-      
-      const activity_grade = new_activity_list.new_grade_activity.find(g => g.grade === grade);
-
-      if (!activity_grade) {
-        console.warn(`  -> Grade '${grade}' found in process but not in closing stock summary. Skipping.`);
-        continue;
-      }
-
-      // 4. Calculate values
-      const grade_input_qty = process_object.input_item_names[grade] || 0;
-      const grade_output_qty = process_object.output_item_names[grade] || 0;
-      
-      let grade_allocated_loss = 0;
-      if (total_process_input_qty > 0 && grade_input_qty > 0) { // Loss is only allocated to inputs
-        grade_allocated_loss = (grade_input_qty / total_process_input_qty) * total_process_loss;
-      }
-      
-      // 5. Update activity list in memory
-      activity_grade.to_processing_qty += grade_input_qty;
-      activity_grade.from_processing_qty += grade_output_qty;
-      activity_grade.loss_gain_qty += grade_allocated_loss;
-
-      // 6. Create row object
-      // (The schema provided has no 'batch_number', so it is omitted)
-      const newGradeProcessRow = [
-        new_process_id,
-        grade,
-        grade_input_qty,
-        grade_output_qty,
-        grade_allocated_loss
+      const insertValues = [
+        summary_id,
+        safeProcessDate, 
+        process_object.process_type,
+        process_object.process_number,
+        total_process_input_qty,
+        total_process_output_qty,
+        milling_loss,
+        processing_loss
       ];
-      grade_processing_rows_to_insert.push(newGradeProcessRow);
-    }
-    // --- 3. END: MODIFIED GRADE LOGIC ---
-    
-    // 7. Batch insert grade rows
-    if (grade_processing_rows_to_insert.length > 0) {
+
       try {
-        const gradeInsertQuery = `
-          INSERT INTO daily_grade_processing (
-            process_id, grade, input_qty, output_qty, processing_loss_gain_qty
-          ) VALUES ?
-        `;
-        await query<ResultSetHeader>({
-          query: gradeInsertQuery,
-          values: [grade_processing_rows_to_insert] // Pass as 3D array
+        const result = await query<ResultSetHeader>({
+          query: processInsertQuery,
+          values: insertValues,
         });
-        console.log(`  -> Inserted ${grade_processing_rows_to_insert.length} 'daily_grade_processing' rows.`);
-      } catch (error) {
-        console.error(`[DEBIT/CREDIT] Failed to batch insert 'daily_grade_processing' rows for process ID ${new_process_id}.`, error);
-      }
-    }
-
-    // --- 8. MODIFIED: Loop through strategies to create 'daily_strategy_processing' rows ---
-    const strategy_processing_rows_to_insert = [];
-    
-    // Get all unique batch numbers from both inputs and outputs for this process
-    const all_batch_numbers = new Set([
-      ...Object.keys(process_object.input_batches),
-      ...Object.keys(process_object.output_batches)
-    ]);
-
-    for (const batch_number of all_batch_numbers) {
-      const input_details = process_object.input_batches[batch_number];
-      const output_details = process_object.output_batches[batch_number];
-
-      // Get quantities
-      const batch_input_qty = input_details?.quantity || 0;
-      const batch_output_qty = output_details?.quantity || 0;
-      
-      // Determine strategy (prioritize input, then output, then undefined)
-      const strategy = input_details?.strategy || output_details?.strategy || 'UNDEFINED';
-
-      // --- START FIX: Find or Create logic ---
-      let activity_strategy = new_activity_list.new_strategy_activity.find(s => s.strategy === strategy);
-
-      // If the strategy doesn't exist in our activity list, create it in memory
-      if (!activity_strategy) {
-        console.warn(`  -> Strategy '${strategy}' for batch '${batch_number}' not found. Creating a new activity record for it...`);
         
-        const summaryDateString = formatDateAsLocal_YYYYMMDD(targetDate);
+        if (result) {
+          if (result.affectedRows === 1) {
+              new_process_id = result.insertId;
+              is_new_insert = true;
+          } else {
+              const fetchExistingIdQuery = `SELECT id FROM daily_processes WHERE process_number = ?`;
+              
+              const selectResult = await query<RowDataPacket[]>({
+                  query: fetchExistingIdQuery,
+                  values: [process_object.process_number]
+              });
+              
+              if (selectResult && Array.isArray(selectResult) && selectResult.length > 0) {
+                  const rows = selectResult[0]; 
+                  if (Array.isArray(rows) && rows.length > 0) {
+                      new_process_id = rows[0].id;
+                  }
+              }
+          }
+        }
+        
+        console.log(`  -> Process row (ID: ${new_process_id}) ${is_new_insert ? 'CREATED' : 'UPDATED'} based on process_number.`);
 
-        activity_strategy = {
-          summary_id: summary_id,
-          date: summaryDateString,
-          strategy: strategy,
-          opening_qty: 0, // No opening stock for a new strategy
-          xbs_closing_stock: 0, // Will be calculated later
-          to_processing_qty: 0,
-          from_processing_qty: 0,
-          loss_gain_qty: 0,
-          inbound_qty: 0,
-          outbound_qty: 0,
-          stock_adjustment_qty: 0,
-          regrade_discrepancy: 0
-        };
-        // Add this new object to the main list so it's included in the return value
-        new_activity_list.new_strategy_activity.push(activity_strategy);
-      }
-      // --- END FIX ---
-
-      // Allocate loss based on this batch's share of the total input
-      let batch_allocated_loss = 0;
-      if (total_process_input_qty > 0 && batch_input_qty > 0) { // Loss is only allocated to inputs
-        batch_allocated_loss = (batch_input_qty / total_process_input_qty) * total_process_loss;
-      }
-
-      // Update the main strategy activity list in memory
-      activity_strategy.to_processing_qty += batch_input_qty;
-      activity_strategy.from_processing_qty += batch_output_qty;
-      activity_strategy.loss_gain_qty += batch_allocated_loss;
-
-      // Create the 'daily_strategy_processing' row object
-      const newStrategyProcessRow = [
-        new_process_id,
-        strategy,
-        batch_number,
-        batch_input_qty,
-        batch_output_qty,
-        batch_allocated_loss
-      ];
-      strategy_processing_rows_to_insert.push(newStrategyProcessRow);
-    }
-
-    // 9. Batch insert all strategy rows for this process
-    if (strategy_processing_rows_to_insert.length > 0) {
-      try {
-        const strategyInsertQuery = `
-          INSERT INTO daily_strategy_processing (
-            process_id, strategy, batch_number, input_qty, output_qty, processing_loss_gain_qty
-          ) VALUES ?
-        `;
-        await query<ResultSetHeader>({
-          query: strategyInsertQuery,
-          values: [strategy_processing_rows_to_insert] // Pass as 3D array
-        });
-        console.log(`  -> Inserted ${strategy_processing_rows_to_insert.length} 'daily_strategy_processing' rows.`);
       } catch (error) {
-        console.error(`[DEBIT/CREDIT] Failed to batch insert 'daily_strategy_processing' rows for process ID ${new_process_id}.`, error);
+        console.error(`[DEBIT/CREDIT] Failed to CREATE/UPDATE 'daily_processes' row for ${process_object.process_number}. Skipping this process.`, error);
+        continue; 
       }
-    }
+      
+      if (new_process_id === 0) {
+          console.error(`[DEBIT/CREDIT] Could not determine ID for process ${process_object.process_number}. Skipping.`);
+          continue;
+      }
+
+      // --- 3. Grade Logic ---
+      const grade_processing_rows_to_insert = [];
+
+      const all_grades_in_process = new Set([
+          ...Object.keys(process_object.input_item_names),
+          ...Object.keys(process_object.output_item_names)
+      ]);
+
+      console.log(`  -> Found ${all_grades_in_process.size} unique grades for this process.`);
+
+      for (const grade of all_grades_in_process) {
+          
+          const activity_grade = new_activity_list.new_grade_activity.find(g => g.grade === grade);
+
+          if (!activity_grade) {
+              console.warn(`  -> Grade '${grade}' found in process but not in closing stock summary. Skipping.`);
+              continue;
+          }
+
+          const grade_input_qty = process_object.input_item_names[grade] || 0;
+          const grade_output_qty = process_object.output_item_names[grade] || 0;
+          
+          let grade_allocated_loss = 0;
+          if (total_process_input_qty > 0 && grade_input_qty > 0) { 
+              grade_allocated_loss = (grade_input_qty / total_process_input_qty) * total_process_loss;
+          }
+          
+          activity_grade.to_processing_qty += grade_input_qty;
+          activity_grade.from_processing_qty += grade_output_qty;
+          activity_grade.loss_gain_qty += grade_allocated_loss;
+
+          const newGradeProcessRow = [
+              new_process_id,
+              grade,
+              grade_input_qty,
+              grade_output_qty,
+              grade_allocated_loss
+          ];
+          grade_processing_rows_to_insert.push(newGradeProcessRow);
+      }
+      
+      // 7. Batch insert grade rows
+      if (grade_processing_rows_to_insert.length > 0) {
+          try {
+              const gradeInsertQuery = `
+                  INSERT INTO daily_grade_processing (
+                      process_id, grade, input_qty, output_qty, processing_loss_gain_qty
+                  ) VALUES ?
+              `;
+              await query<ResultSetHeader>({
+                  query: gradeInsertQuery,
+                  values: [grade_processing_rows_to_insert] 
+              });
+              console.log(`  -> Inserted ${grade_processing_rows_to_insert.length} 'daily_grade_processing' rows.`);
+          } catch (error) {
+              console.error(`[DEBIT/CREDIT] Failed to batch insert 'daily_grade_processing' rows for process ID ${new_process_id}.`, error);
+          }
+      }
+
+      // --- 8. Strategy Logic ---
+      const strategy_processing_rows_to_insert = [];
+      
+      const all_batch_numbers = new Set([
+          ...Object.keys(process_object.input_batches),
+          ...Object.keys(process_object.output_batches)
+      ]);
+
+      for (const batch_number of all_batch_numbers) {
+          const input_details = process_object.input_batches[batch_number];
+          const output_details = process_object.output_batches[batch_number];
+
+          const batch_input_qty = input_details?.quantity || 0;
+          const batch_output_qty = output_details?.quantity || 0;
+          
+          const strategy = input_details?.strategy || output_details?.strategy || 'UNDEFINED';
+
+          let activity_strategy = new_activity_list.new_strategy_activity.find(s => s.strategy === strategy);
+
+          if (!activity_strategy) {
+              console.warn(`  -> Strategy '${strategy}' for batch '${batch_number}' not found. Creating a new activity record for it...`);
+              
+              const safeSummaryDate = new Date(targetDate);
+              safeSummaryDate.setTime(safeSummaryDate.getTime() + (12 * 60 * 60 * 1000));
+              const summaryDateString = formatDateAsLocal_YYYYMMDD(safeSummaryDate);
+
+              activity_strategy = {
+                  summary_id: summary_id,
+                  date: summaryDateString,
+                  strategy: strategy,
+                  opening_qty: 0, 
+                  xbs_closing_stock: 0, 
+                  to_processing_qty: 0,
+                  from_processing_qty: 0,
+                  loss_gain_qty: 0,
+                  inbound_qty: 0,
+                  outbound_qty: 0,
+                  stock_adjustment_qty: 0,
+                  regrade_discrepancy: 0
+              };
+              new_activity_list.new_strategy_activity.push(activity_strategy);
+          }
+
+          let batch_allocated_loss = 0;
+          if (total_process_input_qty > 0 && batch_input_qty > 0) { 
+              batch_allocated_loss = (batch_input_qty / total_process_input_qty) * total_process_loss;
+          }
+
+          activity_strategy.to_processing_qty += batch_input_qty;
+          activity_strategy.from_processing_qty += batch_output_qty;
+          activity_strategy.loss_gain_qty += batch_allocated_loss;
+
+          const newStrategyProcessRow = [
+              new_process_id,
+              strategy.toUpperCase(),
+              batch_number,
+              batch_input_qty,
+              batch_output_qty,
+              batch_allocated_loss
+          ];
+          strategy_processing_rows_to_insert.push(newStrategyProcessRow);
+      }
+
+      // 9. Batch insert all strategy rows
+      if (strategy_processing_rows_to_insert.length > 0) {
+          try {
+              const strategyInsertQuery = `
+                  INSERT INTO daily_strategy_processing (
+                      process_id, strategy, batch_number, input_qty, output_qty, processing_loss_gain_qty
+                  ) VALUES ?
+              `;
+              await query<ResultSetHeader>({
+                  query: strategyInsertQuery,
+                  values: [strategy_processing_rows_to_insert] 
+              });
+              console.log(`  -> Inserted ${strategy_processing_rows_to_insert.length} 'daily_strategy_processing' rows.`);
+          } catch (error) {
+              console.error(`[DEBIT/CREDIT] Failed to batch insert 'daily_strategy_processing' rows for process ID ${new_process_id}.`, error);
+          }
+      }
   }
 
   console.log("[DEBIT/CREDIT] Finished processing all processes.");
   
-  // --- 10. Return the updated activity list object ---
   return new_activity_list;
 }
 
@@ -2073,151 +2504,265 @@ export async function update_daily_summary(
     }
 }
 
+
+const TARGET_STRATEGY_SHEET = "Test Details Summary Report";
+
+// --- INTERFACES ---
+
 /**
- * Helper function to update a single table with new strategies
+ * Interface for the Excel row structure used for strategy lookup
  */
-async function updateTable(
-  tableName: string,
-  strategyColumn: string,
-  batchColumn: string,
-  strategyMap: Map<string, string>
-) {
-  console.log(`[SYNC] Checking table: ${tableName}`);
-  let updatedCount = 0;
-  
-  try {
-    // 1. Find all rows in this table with an 'UNDEFINED' strategy
-    const undefinedRows = await query<RowDataPacket[]>({
-      query: `SELECT id, \`${batchColumn}\` FROM \`${tableName}\` WHERE \`${strategyColumn}\` = 'UNDEFINED'`,
-      values: [],
-    }) as UndefinedRow[]; // Cast to our expected type
-
-    if (undefinedRows.length === 0) {
-      console.log(`[SYNC] No 'UNDEFINED' strategies found in ${tableName}.`);
-      return;
-    }
-
-    console.log(`[SYNC] Found ${undefinedRows.length} 'UNDEFINED' rows in ${tableName}. Checking against map...`);
-    
-    const updatePromises: Promise<any>[] = [];
-
-    // 2. Loop through the rows that need fixing
-    for (const row of undefinedRows) {
-      if (!row.batch_number) continue; // Skip if batch number is null
-
-      const batchNo = row.batch_number.toUpperCase();
-      const newStrategy = strategyMap.get(batchNo); // Look up in our map
-
-      // 3. If we found a match, create an update query
-      if (newStrategy) {
-        updatedCount++;
-        updatePromises.push(
-          query<ResultSetHeader>({
-            query: `UPDATE \`${tableName}\` SET \`${strategyColumn}\` = ? WHERE id = ?`,
-            values: [newStrategy, row.id],
-          })
-        );
-      }
-    }
-
-    // 4. Run all updates in parallel
-    if (updatePromises.length > 0) {
-      await Promise.all(updatePromises);
-    }
-    
-    console.log(`[SYNC] Successfully updated ${updatedCount} rows in ${tableName}.`);
-
-  } catch (error) {
-    console.error(`[SYNC] Error updating ${tableName}:`, error);
-    // Continue to the next table
-  }
+interface TestDetailsStrategyRow {
+    'Batch No.': string | undefined;
+    'POSITION STRATEGY ALLOCATION': string | undefined | null; 
+    [key: string]: any;
 }
 
+/**
+ * Structure for the batched update job
+ */
+interface UpdateJob {
+    id: number;
+    batch_number: string;
+    strategy: string;
+    strategyColumn: string;
+    tableName: string;
+}
 
 /**
- * Reads a list of stock files and updates 'UNDEFINED' strategies
- * across multiple database tables.
- * @param files An array of File objects (Excel and CSV)
+ * Performs updates for a single target table by querying records with UNDEFINED strategy
+ * and looking up the batch_number against the raw Excel rows array.
  */
-export async function updateUndefinedStrategies(files: File[]): Promise<void> {
-  console.log(`[SYNC] Starting to update undefined strategies using ${files.length} files...`);
+async function performStrategyUpdates(
+    tableName: string, 
+    strategyColumn: string, 
+    batchNumberColumn: string,
+    excelRows: TestDetailsStrategyRow[]
+): Promise<void> {
+    console.log(`[SYNC] Updating table: ${tableName}`);
 
-  // --- 1. Build Master Strategy Lookup Map ---
-  const strategyMap = new Map<string, string>();
-  console.log('[SYNC] Building strategy lookup map from files...');
+    // Fetch all records with UNDEFINED strategy
+    const undefinedRecords = await query<RowDataPacket[]>({
+        query: `
+            SELECT id, ${batchNumberColumn} as batch_number
+            FROM ${tableName}
+            WHERE ${strategyColumn} = 'UNDEFINED'
+        `,
+    });
 
-  for (const file of files) {
-    try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
+    if (!undefinedRecords || undefinedRecords.length === 0) {
+        console.log(`[SYNC] No UNDEFINED strategies found in ${tableName}.`);
+        return;
+    }
+    
+    console.log(`[SYNC] Found ${undefinedRecords.length} records in ${tableName} with 'UNDEFINED' strategy.`);
 
-      // Loop through every sheet in the file
-      for (const sheetName of workbook.SheetNames) {
-        const worksheet = workbook.Sheets[sheetName];
-        if (!worksheet) continue;
 
-        let rows: StrategyRow[] = [];
+    const updateJobs: UpdateJob[] = [];
+    
+    for (const dbRecord of undefinedRecords) {
+        // FIX: Robust batch number comparison (trim, uppercase)
+        const dbBatchNumber = (dbRecord.batch_number as string)?.toUpperCase().trim(); 
         
-        // Use specified header row based on file type
-        if (file.name.toLowerCase().endsWith('.csv')) {
-          rows = XLSX.utils.sheet_to_json<StrategyRow>(worksheet, { range: 0 }); // Header on row 1
-        } else if (file.name.toLowerCase().endsWith('.xlsx')) {
-          rows = XLSX.utils.sheet_to_json<StrategyRow>(worksheet, { range: 1 }); // Header on row 2
-        } else {
-          continue; // Skip unsupported files
+        // --- Direct Array Lookup (O(N) operation per DB record) ---
+        const matchingExcelRow = excelRows.find(
+            row => row['Batch No.']?.toString().toUpperCase().trim() === dbBatchNumber
+        );
+        
+        if (matchingExcelRow) {
+            const rawStrategy = matchingExcelRow['POSITION STRATEGY ALLOCATION']?.toString();
+            const newStrategy = rawStrategy ? rawStrategy.trim() : null; 
+            
+            if (newStrategy) {
+                // Prepare job for batch execution
+                updateJobs.push({ 
+                    id: dbRecord.id, 
+                    batch_number: dbRecord.batch_number,
+                    strategy: newStrategy.toUpperCase(),
+                    strategyColumn: strategyColumn,
+                    tableName: tableName,
+                });
+            }
         }
-
-        // Add rows to our master map
-        for (const row of rows) {
-          const batchNo = row['Batch No.']?.toString().toUpperCase();
-          const strategy = row['Position Strategy Allocation']?.toString();
-          
-          if (batchNo && strategy) {
-            // Overwrite existing entries, assuming later files are newer
-            strategyMap.set(batchNo, strategy);
-          }
-        }
-      }
-      console.log(`[SYNC] Processed file: ${file.name}`);
-    } catch (error) {
-      console.error(`[SYNC] Failed to read file ${file.name}:`, error);
     }
-  }
-  console.log(`[SYNC] Strategy map built successfully with ${strategyMap.size} unique entries.`);
 
-  // --- 2. Update Database Tables ---
-  await updateTable(
-    'daily_outbounds', 
-    'dispatched_strategy', 
-    'batch_number', 
-    strategyMap
-  );
+    if (updateJobs.length > 0) {
+        console.log(`[SYNC] Found ${updateJobs.length} potential updates for ${tableName}. Starting batch updates...`);
+        
+        // --- Execute Updates Individually with Detailed Logging ---
+        
+        const updatePromises = updateJobs.map(job =>
+            query<ResultSetHeader>({
+                query: `
+                    UPDATE ${job.tableName}
+                    SET ${job.strategyColumn} = ?
+                    WHERE id = ?
+                `,
+                values: [job.strategy, job.id],
+            })
+            .then((result) => ({ status: 'fulfilled', job, result }))
+            .catch((error) => ({ status: 'rejected', job, error }))
+        );
+        
+        // Use Promise.allSettled to ensure all updates complete (or fail) independently
+        const results = await Promise.allSettled(updatePromises);
 
-  await updateTable(
-    'daily_strategy_processing', 
-    'strategy', 
-    'batch_number', 
-    strategyMap
-  );
+        let successfulUpdates = 0;
+        let failedUpdates = 0;
 
-  await updateTable(
-    'instructed_batches', 
-    'strategy', 
-    'batch_number', 
-    strategyMap
-  );
+        results.forEach(result => {
+            if (result.status === 'fulfilled') {
+                const job = (result.value as any).job;
+                const affectedRows = (result.value as any).result?.affectedRows || 0;
+                
+                if (affectedRows > 0) {
+                    successfulUpdates++;
+                    console.log(`[SUCCESS] ${job.tableName} ID: ${job.id} (Batch: ${job.batch_number}) updated to ${job.strategy}.`);
+                } else {
+                    failedUpdates++;
+                    console.log(`[FAILURE] ${job.tableName} ID: ${job.id} (Batch: ${job.batch_number}): Update query ran but affected 0 rows (Record may have been simultaneously updated or ID was invalid).`);
+                }
 
-  await updateTable(
-    'stock_adjustment', 
-    'strategy', 
-    'batch_number', 
-    strategyMap
-  );
+            } else if (result.status === 'rejected') {
+                failedUpdates++;
+                const job = (result.reason as any).job; // Assuming the catch handler attached the job object
+                const errorMessage = (result.reason as Error).message || JSON.stringify(result.reason);
+                console.error(`[CRITICAL FAILED] ${job.tableName} ID: ${job.id} (Batch: ${job.batch_number}): Database Error: ${errorMessage}`);
+            }
+        });
 
-  console.log('[SYNC] Finished updating all tables.');
+        console.log(`[SUMMARY] ${tableName} updates finished. Successful: ${successfulUpdates}, Failed: ${failedUpdates}.`);
+    } else {
+        console.log(`[SYNC] No matching batches found in the Excel file for UNDEFINED strategies in ${tableName}.`);
+    }
+}
+
+export async function getDailySummaryId(): Promise<number> {
+  // Optimized: Selects only the 'id' column and stops scanning after finding 1 match
+  const sql = `SELECT id FROM daily_stock_summaries WHERE date = CURDATE() LIMIT 1`;
+
+  const rows = await query<RowDataPacket[]>({ query: sql });
+
+  // Returns the id if the row exists, otherwise returns 0
+  return rows?.[0]?.id || 0;
 }
 
 
+
+export async function deleteDailySummary(id: number): Promise<boolean> {
+  // Optimized: directly deletes by ID and checks affectedRows to confirm deletion
+  const sql = `DELETE FROM daily_stock_summaries WHERE id = ?`;
+  
+  const result = await query<ResultSetHeader>({ 
+    query: sql, 
+    values: [id] 
+  });
+
+  // Returns true if a row was actually deleted
+  return result ? result.affectedRows > 0 : false;
+}
+
+/**
+ * Reads a single Test Details Summary file, loads data into an array (dataframe), 
+ * and updates 'UNDEFINED' strategies across database tables using a direct array lookup.
+ * @param excelFile The single File object containing the batch strategies (Excel or CSV).
+ */
+export async function updateUndefinedStrategies(excelFile: File | null | undefined): Promise<void> {
+    console.log(`[SYNC] Starting to update undefined strategies using single file lookup...`);
+
+    let excelRows: TestDetailsStrategyRow[] = [];
+    
+    if (!excelFile) {
+        console.log('[SYNC] No Excel file provided. Skipping strategy update.');
+        return; 
+    }
+
+    // Since the header is always on row 1, we explicitly set the range to 0.
+    const range = 0; 
+    console.log(`[SYNC] Reading file: ${excelFile.name} and looking for sheet: ${TARGET_STRATEGY_SHEET} (Header on Row ${range + 1})`);
+
+    try {
+        const buffer = await excelFile.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+
+        for (const sheetName of workbook.SheetNames) {
+            if (sheetName !== TARGET_STRATEGY_SHEET) {
+                continue; 
+            }
+            
+            const worksheet = workbook.Sheets[sheetName];
+            if (!worksheet) continue;
+
+            let rows: TestDetailsStrategyRow[] = [];
+            // Use the specified range: 0 (Row 1 header)
+            rows = XLSX.utils.sheet_to_json<TestDetailsStrategyRow>(worksheet, { range: range }); 
+            
+            // --- LOGGING: Column Names and First 5 Rows ---
+            if (rows.length > 0) {
+                // Get column names (keys of the first object)
+                const columnNames = Object.keys(rows[0]);
+                console.log(`[SYNC] Successfully parsed data. Columns found (${columnNames.length}): ${columnNames.join(', ')}`);
+                
+                // Log the first 5 rows for inspection
+                const firstFiveRows = rows.slice(0, 5);
+                console.log(`[SYNC] First 5 data rows (using range: ${range}):`);
+                firstFiveRows.forEach((row, index) => {
+                    console.log(`[SYNC] Row ${index + 1}: ${JSON.stringify(row)}`);
+                });
+            }
+            // ---------------------------------------------
+            
+            // Only data from the target sheet is pushed
+            excelRows.push(...rows);
+        }
+        
+        if (excelRows.length > 0) {
+            console.log(`[SYNC] Successfully loaded ${excelRows.length} rows from sheet: ${TARGET_STRATEGY_SHEET}`);
+        } else {
+            console.log(`[SYNC] Sheet '${TARGET_STRATEGY_SHEET}' found, but no data rows were loaded. Check if the sheet is empty or if the TARGET_STRATEGY_SHEET variable is correct.`);
+        }
+    } catch (error) {
+        console.error(`[SYNC] Failed to read or parse file ${excelFile.name}:`, error);
+        return; // Exit if file reading fails
+    }
+    
+    if (excelRows.length === 0) {
+        console.log('[SYNC] No valid data loaded from the file. No database updates performed.');
+        return;
+    }
+
+    // --- 2. Update Database Tables using the excelRows array (dataframe) ---
+
+    await performStrategyUpdates(
+        'daily_outbounds', 
+        'dispatched_strategy', 
+        'batch_number', 
+        excelRows
+    );
+
+    await performStrategyUpdates(
+        'daily_strategy_processing', 
+        'strategy', 
+        'batch_number', 
+        excelRows
+    );
+
+    await performStrategyUpdates(
+        'instructed_batches', 
+        'strategy', 
+        'batch_number', 
+        excelRows
+    );
+
+    await performStrategyUpdates(
+        'stock_adjustment', 
+        'strategy', 
+        'batch_number', 
+        excelRows
+    );
+
+    console.log('[SYNC] Finished updating all tables.');
+}
 /**
  * Calculates all daily stock movements for new grade activities based on transaction tables,
  * determines opening and closing stock, calculates discrepancy, and saves the final records.
@@ -2239,9 +2784,8 @@ export async function update_grade_stock_movements(
     return;
   }
 
-  // --- 1. Fetch Aggregated Transaction Data (Efficiency Improvement) ---
-
-  // 1a. Processing (to_processing_qty, from_processing_qty, loss_gain_qty)
+  // --- 1. Parallelized Data Fetching ---
+  
   const processingQuery = `
     SELECT
         dgp.grade,
@@ -2253,15 +2797,7 @@ export async function update_grade_stock_movements(
     WHERE dp.summary_id = ?
     GROUP BY dgp.grade
   `;
-  const processingResults = (await query<GradeProcessingTotals[]>({
-    query: processingQuery,
-    values: [summary_id],
-  })) || [];
-  const processingMap = new Map(
-    processingResults.map((row) => [row.grade, row]),
-  );
 
-  // 1b. Inbound (inbound_qty)
   const inboundQuery = `
     SELECT
         grade,
@@ -2270,13 +2806,7 @@ export async function update_grade_stock_movements(
     WHERE summary_id = ?
     GROUP BY grade
   `;
-  const inboundResults = (await query<GradeInboundTotals[]>({
-    query: inboundQuery,
-    values: [summary_id],
-  })) || [];
-  const inboundMap = new Map(inboundResults.map((row) => [row.grade, row.total_inbound]));
 
-  // 1c. Outbound (outbound_qty)
   const outboundQuery = `
     SELECT
         dispatched_grade,
@@ -2285,15 +2815,7 @@ export async function update_grade_stock_movements(
     WHERE summary_id = ?
     GROUP BY dispatched_grade
   `;
-  const outboundResults = (await query<GradeOutboundTotals[]>({
-    query: outboundQuery,
-    values: [summary_id],
-  })) || [];
-  const outboundMap = new Map(
-    outboundResults.map((row) => [row.dispatched_grade, row.total_outbound]),
-  );
 
-  // 1d. Stock Adjustment (stock_adjustment_qty)
   const adjustmentQuery = `
     SELECT
         grade,
@@ -2302,13 +2824,25 @@ export async function update_grade_stock_movements(
     WHERE summary_id = ?
     GROUP BY grade
   `;
-  const adjustmentResults = (await query<GradeAdjustmentTotals[]>({
-    query: adjustmentQuery,
-    values: [summary_id],
-  })) || [];
-  const adjustmentMap = new Map(
-    adjustmentResults.map((row) => [row.grade, row.total_adjustment]),
-  );
+
+  // Execute all 4 queries concurrently
+  const [
+    processingResults,
+    inboundResults,
+    outboundResults,
+    adjustmentResults
+  ] = await Promise.all([
+    query<GradeProcessingTotals[]>({ query: processingQuery, values: [summary_id] }),
+    query<GradeInboundTotals[]>({ query: inboundQuery, values: [summary_id] }),
+    query<GradeOutboundTotals[]>({ query: outboundQuery, values: [summary_id] }),
+    query<GradeAdjustmentTotals[]>({ query: adjustmentQuery, values: [summary_id] })
+  ]);
+
+  // Create Maps for O(1) lookup
+  const processingMap = new Map((processingResults || []).map((row) => [row.grade, row]));
+  const inboundMap = new Map((inboundResults || []).map((row) => [row.grade, row.total_inbound]));
+  const outboundMap = new Map((outboundResults || []).map((row) => [row.dispatched_grade, row.total_outbound]));
+  const adjustmentMap = new Map((adjustmentResults || []).map((row) => [row.grade, row.total_adjustment]));
 
 
   // --- 2. Iterate, Calculate, and Update Each Activity Record ---
@@ -2322,7 +2856,8 @@ export async function update_grade_stock_movements(
 
     // 2a. Apply Aggregated Transaction Quantities
     const procData = processingMap.get(grade);
-    // FIX: Use Number() to ensure all transaction quantities are numeric before calculation.
+    
+    // Explicit Number() casting for safety
     activity.to_processing_qty = Number(procData?.total_to_processing) || 0;
     activity.from_processing_qty = Number(procData?.total_from_processing) || 0;
     activity.loss_gain_qty = Number(procData?.total_loss_gain) || 0;
@@ -2332,7 +2867,6 @@ export async function update_grade_stock_movements(
     activity.stock_adjustment_qty = Number(adjustmentMap.get(grade)) || 0;
 
     // 2b. xbs_closing_stock (From Stocks Data)
-    // FIX: Ensure closing stock is also numeric
     activity.xbs_closing_stock = Number(stocksdata.grades_closing_balances[grade]) || 0;
 
     // 2c. opening_qty (From Previous Day's Closing Stock)
@@ -2348,12 +2882,9 @@ export async function update_grade_stock_movements(
       values: [grade],
     })) || [];
 
-    // FIX: Ensure previous day's closing stock is numeric
     activity.opening_qty = Number(prevStockResult[0]?.xbs_closing_stock) || 0;
 
     // 2d. regrade_discrepancy (Final Calculation)
-    // Formula: xbs_closing_stock - ((opening_qty + from_processing_qty + loss_gain_qty + inbound_qty + stock_adjustment_qty) - (to_processing_qty + outbound_qty ))
-    
     const additions =
       activity.opening_qty +
       activity.from_processing_qty +
@@ -2370,7 +2901,7 @@ export async function update_grade_stock_movements(
     activity.regrade_discrepancy = activity.xbs_closing_stock - calculatedClosing;
   }
 
-  // --- 3. Save All Updated Records (Bulk Insert) ---
+  // --- 3. Save All Updated Records (Bulk Insert with UPSERT) ---
 
   const gradeFields = [
     'summary_id', 'date', 'grade', 'opening_qty', 'to_processing_qty',
@@ -2381,14 +2912,25 @@ export async function update_grade_stock_movements(
   const valuesPlaceholder = new_grade_activity.map(() => `(${gradeFields.map(() => '?').join(', ')})`).join(', ');
   
   const allValues: (string | number)[] = new_grade_activity.flatMap((activity) => [
-    activity.summary_id, activity.date, activity.grade, activity.opening_qty, activity.to_processing_qty,
+    activity.summary_id, activity.date, activity.grade.toUpperCase(), activity.opening_qty, activity.to_processing_qty,
     activity.from_processing_qty, activity.loss_gain_qty, activity.inbound_qty, activity.outbound_qty,
     activity.stock_adjustment_qty, activity.xbs_closing_stock, activity.regrade_discrepancy,
   ]);
   
+  // OPTIMIZATION: Uses ON DUPLICATE KEY UPDATE to handle existing records efficiently
   const insertQuery = `
     INSERT INTO daily_grade_activities (${gradeFields.join(', ')})
     VALUES ${valuesPlaceholder}
+    ON DUPLICATE KEY UPDATE
+        opening_qty = VALUES(opening_qty),
+        to_processing_qty = VALUES(to_processing_qty),
+        from_processing_qty = VALUES(from_processing_qty),
+        loss_gain_qty = VALUES(loss_gain_qty),
+        inbound_qty = VALUES(inbound_qty),
+        outbound_qty = VALUES(outbound_qty),
+        stock_adjustment_qty = VALUES(stock_adjustment_qty),
+        xbs_closing_stock = VALUES(xbs_closing_stock),
+        regrade_discrepancy = VALUES(regrade_discrepancy)
   `;
 
   try {
@@ -2396,15 +2938,12 @@ export async function update_grade_stock_movements(
       query: insertQuery,
       values: allValues,
     });
-    console.log(`Successfully inserted ${result?.affectedRows} grade activity records.`);
+    console.log(`Successfully processed ${result?.affectedRows} grade activity records.`);
   } catch (error) {
     console.error('Failed to insert daily_grade_activities:', error);
     throw new Error('Database insertion failed for grade activities.');
   }
-
-  // NOTE: Logic for daily_strategy_activities was not provided and is skipped.
 }
-
 
 
 /**
@@ -2428,8 +2967,9 @@ export async function update_strategy_stock_movements(
     return;
   }
 
+  // --- 1. Parallelized Data Fetching ---
+  // We fetch all aggregates concurrently to reduce total wait time.
 
-  // 1a. Processing (to_processing_qty, from_processing_qty, loss_gain_qty)
   const processingQuery = `
     SELECT
         dsp.strategy,
@@ -2441,15 +2981,7 @@ export async function update_strategy_stock_movements(
     WHERE dp.summary_id = ?
     GROUP BY dsp.strategy
   `;
-  const processingResults = (await query<StrategyProcessingTotals[]>({
-    query: processingQuery,
-    values: [summary_id],
-  })) || [];
-  const processingMap = new Map(
-    processingResults.map((row) => [row.strategy, row]),
-  );
 
-  // 1b. Inbound (inbound_qty)
   const inboundQuery = `
     SELECT
         strategy,
@@ -2458,13 +2990,7 @@ export async function update_strategy_stock_movements(
     WHERE summary_id = ?
     GROUP BY strategy
   `;
-  const inboundResults = (await query<StrategyInboundTotals[]>({
-    query: inboundQuery,
-    values: [summary_id],
-  })) || [];
-  const inboundMap = new Map(inboundResults.map((row) => [row.strategy, row.total_inbound]));
 
-  // 1c. Outbound (outbound_qty)
   const outboundQuery = `
     SELECT
         dispatched_strategy,
@@ -2473,15 +2999,7 @@ export async function update_strategy_stock_movements(
     WHERE summary_id = ?
     GROUP BY dispatched_strategy
   `;
-  const outboundResults = (await query<StrategyOutboundTotals[]>({
-    query: outboundQuery,
-    values: [summary_id],
-  })) || [];
-  const outboundMap = new Map(
-    outboundResults.map((row) => [row.dispatched_strategy, row.total_outbound]),
-  );
 
-  // 1d. Stock Adjustment (stock_adjustment_qty)
   const adjustmentQuery = `
     SELECT
         strategy,
@@ -2490,13 +3008,25 @@ export async function update_strategy_stock_movements(
     WHERE summary_id = ?
     GROUP BY strategy
   `;
-  const adjustmentResults = (await query<StrategyAdjustmentTotals[]>({
-    query: adjustmentQuery,
-    values: [summary_id],
-  })) || [];
-  const adjustmentMap = new Map(
-    adjustmentResults.map((row) => [row.strategy, row.total_adjustment]),
-  );
+
+  // Execute all 4 queries in parallel
+  const [
+    processingResults,
+    inboundResults,
+    outboundResults,
+    adjustmentResults
+  ] = await Promise.all([
+    query<StrategyProcessingTotals[]>({ query: processingQuery, values: [summary_id] }),
+    query<StrategyInboundTotals[]>({ query: inboundQuery, values: [summary_id] }),
+    query<StrategyOutboundTotals[]>({ query: outboundQuery, values: [summary_id] }),
+    query<StrategyAdjustmentTotals[]>({ query: adjustmentQuery, values: [summary_id] })
+  ]);
+
+  // Create Maps for O(1) lookup
+  const processingMap = new Map((processingResults || []).map((row) => [row.strategy, row]));
+  const inboundMap = new Map((inboundResults || []).map((row) => [row.strategy, row.total_inbound]));
+  const outboundMap = new Map((outboundResults || []).map((row) => [row.dispatched_strategy, row.total_outbound]));
+  const adjustmentMap = new Map((adjustmentResults || []).map((row) => [row.strategy, row.total_adjustment]));
 
 
   // --- 2. Iterate, Calculate, and Update Each Activity Record ---
@@ -2510,7 +3040,8 @@ export async function update_strategy_stock_movements(
 
     // 2a. Apply Aggregated Transaction Quantities
     const procData = processingMap.get(strategy);
-    // FIX: Use Number() to ensure all transaction quantities are numeric before calculation.
+    
+    // Use Number() to ensure type safety for arithmetic
     activity.to_processing_qty = Number(procData?.total_to_processing) || 0;
     activity.from_processing_qty = Number(procData?.total_from_processing) || 0;
     activity.loss_gain_qty = Number(procData?.total_loss_gain) || 0;
@@ -2520,7 +3051,6 @@ export async function update_strategy_stock_movements(
     activity.stock_adjustment_qty = Number(adjustmentMap.get(strategy)) || 0;
 
     // 2b. xbs_closing_stock (From Stocks Data)
-    // FIX: Ensure closing stock is also numeric
     activity.xbs_closing_stock = Number(stocksdata.strategies_closing_balances[strategy]) || 0;
 
     // 2c. opening_qty (From Previous Day's Closing Stock)
@@ -2536,11 +3066,10 @@ export async function update_strategy_stock_movements(
       values: [strategy],
     })) || [];
 
-    // FIX: Ensure previous day's closing stock is numeric
     activity.opening_qty = Number(prevStockResult[0]?.xbs_closing_stock) || 0;
 
     // 2d. regrade_discrepancy (Final Calculation)
-    // Formula: xbs_closing_stock - ((opening_qty + from_processing_qty + loss_gain_qty + inbound_qty + stock_adjustment_qty) - (to_processing_qty + outbound_qty ))
+    // Formula: Closing - (Opening + Additions - Subtractions)
     
     const additions =
       activity.opening_qty +
@@ -2558,7 +3087,7 @@ export async function update_strategy_stock_movements(
     activity.regrade_discrepancy = activity.xbs_closing_stock - calculatedClosing;
   }
 
-  // --- 3. Save All Updated Records (Bulk Insert) ---
+  // --- 3. Save All Updated Records (Bulk Insert with UPSERT) ---
 
   const strategyFields = [
     'summary_id', 'date', 'strategy', 'opening_qty', 'to_processing_qty',
@@ -2569,24 +3098,308 @@ export async function update_strategy_stock_movements(
   const valuesPlaceholder = new_strategy_activity.map(() => `(${strategyFields.map(() => '?').join(', ')})`).join(', ');
   
   const allValues: (string | number)[] = new_strategy_activity.flatMap((activity) => [
-    activity.summary_id, activity.date, activity.strategy, activity.opening_qty, activity.to_processing_qty,
+    activity.summary_id, activity.date, activity.strategy.toUpperCase(), activity.opening_qty, activity.to_processing_qty,
     activity.from_processing_qty, activity.loss_gain_qty, activity.inbound_qty, activity.outbound_qty,
     activity.stock_adjustment_qty, activity.xbs_closing_stock, activity.regrade_discrepancy,
   ]);
   
+  // OPTIMIZATION: ON DUPLICATE KEY UPDATE prevents unique constraint errors by updating existing rows
   const insertQuery = `
-    INSERT INTO daily_strategy_activities (${strategyFields.join(', ')}) VALUES ${valuesPlaceholder} `;
+    INSERT INTO daily_strategy_activities (${strategyFields.join(', ')}) 
+    VALUES ${valuesPlaceholder} 
+    ON DUPLICATE KEY UPDATE
+        opening_qty = VALUES(opening_qty),
+        to_processing_qty = VALUES(to_processing_qty),
+        from_processing_qty = VALUES(from_processing_qty),
+        loss_gain_qty = VALUES(loss_gain_qty),
+        inbound_qty = VALUES(inbound_qty),
+        outbound_qty = VALUES(outbound_qty),
+        stock_adjustment_qty = VALUES(stock_adjustment_qty),
+        xbs_closing_stock = VALUES(xbs_closing_stock),
+        regrade_discrepancy = VALUES(regrade_discrepancy)
+  `;
 
   try {
     const result = await query<ResultSetHeader>({
       query: insertQuery,
       values: allValues,
     });
-    console.log(`Successfully inserted ${result?.affectedRows} strategy activity records.`);
+    console.log(`Successfully processed ${result?.affectedRows} strategy activity records.`);
   } catch (error) {
     console.error('Failed to insert daily_strategy_activities:', error);
     throw new Error('Database insertion failed for strategy activities.');
   }
+}
 
-  // NOTE: Logic for daily_strategy_activities was not provided and is skipped.
+export interface BatchItem {
+    mark: string | number | null;
+    grade: string | number | null;
+    cost: string | number | null;
+    differential: string | number | null;
+}
+
+export interface SheetData {
+    fileName: string; 
+    sheetName: string;
+    hegde_level: string | number | null;
+    date: string | number | null;
+    batch_list: BatchItem[];
+}
+
+export interface DatabaseBatchItem {
+    lot: string | number | null;
+    grade: string | number | null;
+    price: string | number | null;
+    market_level: string | number | null;
+    differential: string | number | null;
+    cert: string | number | null;
+}
+
+export interface DatabaseSheetData {
+    fileName: string;
+    cost_usd_50_db: string | number | null;
+    database_batch_list: DatabaseBatchItem[];
+}
+
+export interface ProcessedPurchaseFile {
+    ds_sheets: SheetData[];
+    database_sheet: DatabaseSheetData | null;
+}
+
+export interface CatalogueRecord {
+    sale_type: string;
+    sale_number: string | number | null;
+    outturn: string | number | null;
+    grower_mark: string | number | null;
+    lot_number: string | number | null;
+    weight: string | number | null;
+    grade: string | number | null;
+    season: string | number | null;
+    certification: string | number | null;
+    batch_number: string | number | null;
+    cost_usd_50: string | number | null;
+    hedge_usc_lb: string | number | null;
+    diff_usc_lb: string | number | null;
+    trade_month: string | number | null;
+}
+
+
+function convertDateToTradeMonth(dateValue: string | number | null): string | null {
+    if (dateValue === null || dateValue === undefined) return null;
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let date: Date;
+
+    if (typeof dateValue === 'number') {
+        try {
+            const parsedDate = XLSX.SSF.parse_date_code(dateValue);
+            date = new Date(parsedDate.y, parsedDate.m - 1, parsedDate.d);
+        } catch (e) { return null; }
+    } else if (typeof dateValue === 'string') {
+        const parts = dateValue.split('.');
+        if (parts.length < 3) return null;
+        try {
+            const year = parseInt(parts[2].length === 2 ? `20${parts[2]}` : parts[2]);
+            const month = parseInt(parts[1]) - 1; 
+            const day = parseInt(parts[0]);
+            date = new Date(year, month, day);
+        } catch (e) { return null; }
+    } else { return null; }
+    
+    if (isNaN(date.getTime())) return null;
+    return `${monthNames[date.getMonth()]}-${date.getFullYear()}`;
+}
+
+export function readFileAsArrayBuffer(file: File): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(new Uint8Array(e.target?.result as ArrayBuffer));
+        reader.onerror = (e) => reject(new Error(`Failed to read file ${file.name}`));
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+function processPurchaseFileContent(excelFileArrayBuffer: Uint8Array, fileName: string): ProcessedPurchaseFile {
+    const workbook = XLSX.read(excelFileArrayBuffer, { type: 'array' });
+    const processedFile: ProcessedPurchaseFile = { ds_sheets: [], database_sheet: null };
+    
+    const dsSheetNames = workbook.SheetNames.filter(name => name.includes('DS'));
+    const dbSheetName = workbook.SheetNames.find(name => name.includes('Database'));
+
+    // 1. Process DS Sheets
+    for (const sheetName of dsSheetNames) {
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) continue;
+
+        const sheetResult: SheetData = {
+            fileName, sheetName,
+            hegde_level: worksheet['G2'] ? worksheet['G2'].v : null,
+            date: worksheet['A3'] ? worksheet['A3'].v : null, 
+            batch_list: []
+        };
+
+        const sheetDataArray: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 6, defval: null });
+        if (sheetDataArray.length < 1) continue;
+        
+        const headerRow = (sheetDataArray[0] as any[]).map(h => (h && typeof h === 'string' ? h.trim().toUpperCase() : h));
+        const dataRows = sheetDataArray.slice(1);
+
+        const colIndices: any = {};
+        ['MARK', 'GRADE', 'CPRICE', 'DIFFERENTIAL', 'LOT'].forEach(k => {
+             const idx = headerRow.indexOf(k);
+             if (idx !== -1) colIndices[k] = idx;
+        });
+
+        for (const row of dataRows) {
+            const lotValue = colIndices['LOT'] !== undefined ? row[colIndices['LOT']] : null;
+            if (!lotValue || (typeof lotValue === 'string' && !lotValue.trim())) break;
+
+            sheetResult.batch_list.push({
+                mark: colIndices['MARK'] !== undefined ? row[colIndices['MARK']] : null,
+                grade: colIndices['GRADE'] !== undefined ? row[colIndices['GRADE']] : null,
+                cost: colIndices['CPRICE'] !== undefined ? row[colIndices['CPRICE']] : null,
+                differential: colIndices['DIFFERENTIAL'] !== undefined ? row[colIndices['DIFFERENTIAL']] : null,
+            });
+        }
+        processedFile.ds_sheets.push(sheetResult);
+    }
+
+    // 2. Process Database Sheet
+    if (dbSheetName) {
+        const worksheet = workbook.Sheets[dbSheetName];
+        const db_cost_usd_50 = worksheet['H2'] ? worksheet['H2'].v : null;
+        const sheetDataArray: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, range: 4, defval: null });
+
+        if (sheetDataArray.length > 1) {
+            const headerRow = (sheetDataArray[0] as any[]).map(h => (h && typeof h === 'string' ? h.trim().toUpperCase() : h));
+            const dataRows = sheetDataArray.slice(1);
+            
+            const dbColIndices: any = {};
+            ['LOT', 'GRADE', 'PRICE', 'MARKET LEVEL', 'DIFFERENTIAL', 'CERT', 'SALE'].forEach(k => {
+                 const idx = headerRow.indexOf(k);
+                 if (idx !== -1) dbColIndices[k] = idx;
+            });
+
+            const filteredBatchList: DatabaseBatchItem[] = [];
+            for (const row of dataRows) {
+                const saleValue = dbColIndices['SALE'] !== undefined ? String(row[dbColIndices['SALE']] || '').trim().toUpperCase() : null;
+                if (saleValue === 'DS') {
+                    filteredBatchList.push({
+                        lot: dbColIndices['LOT'] !== undefined ? row[dbColIndices['LOT']] : null,
+                        grade: dbColIndices['GRADE'] !== undefined ? row[dbColIndices['GRADE']] : null,
+                        price: dbColIndices['PRICE'] !== undefined ? row[dbColIndices['PRICE']] : null,
+                        market_level: dbColIndices['MARKET LEVEL'] !== undefined ? row[dbColIndices['MARKET LEVEL']] : null,
+                        differential: dbColIndices['DIFFERENTIAL'] !== undefined ? row[dbColIndices['DIFFERENTIAL']] : null,
+                        cert: dbColIndices['CERT'] !== undefined ? row[dbColIndices['CERT']] : null,
+                    });
+                }
+            }
+            processedFile.database_sheet = { fileName, cost_usd_50_db: db_cost_usd_50, database_batch_list: filteredBatchList };
+        }
+    }
+    return processedFile;
+}
+
+export function processCatalogueSummary(excelFileArrayBuffer: Uint8Array, fileName: string, processedPurchaseData: ProcessedPurchaseFile): CatalogueRecord[] {
+    const workbook = XLSX.read(excelFileArrayBuffer, { type: 'array' });
+    const records: CatalogueRecord[] = [];
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) return records;
+
+    const rawData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
+    if (rawData.length === 0) return records;
+
+    const headerRow = (rawData[0] as string[]).map(h => (h && typeof h === 'string' ? h.trim() : h));
+    const dataRows = rawData.slice(1);
+
+    const colIndices: any = {};
+    ['Sale No.', 'Outturn', 'Grower Marks', 'Lot No.', 'Kilos', 'Grade', 'Season', 'Certification', 'Batch No.', 'Costs', 'Hedge(USC/LB)', 'Diff(USC/LB)', 'Trade Month'].forEach(k => {
+         const idx = headerRow.indexOf(k);
+         if (idx !== -1) colIndices[k] = idx;
+    });
+
+    const getCellValue = (row: any[], header: string) => colIndices[header] !== undefined ? row[colIndices[header]] : null;
+
+    for (const row of dataRows) {
+        const csTradeMonth = getCellValue(row, 'Trade Month');
+        const csOutturn = String(getCellValue(row, 'Outturn') || '').toUpperCase();
+        const csGrade = String(getCellValue(row, 'Grade') || '').toUpperCase();
+        const csLotNumber = String(getCellValue(row, 'Lot No.') || '').toUpperCase();
+        const csBatchNumber = getCellValue(row, 'Batch No.');
+
+        if (!csBatchNumber) continue;
+
+        let record: CatalogueRecord = {
+            sale_type: "Auction",
+            sale_number: getCellValue(row, 'Sale No.'),
+            outturn: getCellValue(row, 'Outturn'),
+            grower_mark: getCellValue(row, 'Grower Marks'),
+            lot_number: getCellValue(row, 'Lot No.'),
+            weight: getCellValue(row, 'Kilos'),
+            grade: getCellValue(row, 'Grade'),
+            season: getCellValue(row, 'Season'),
+            certification: getCellValue(row, 'Certification'),
+            batch_number: csBatchNumber,
+            cost_usd_50: null, hedge_usc_lb: null, diff_usc_lb: null, trade_month: null,
+        };
+
+        if (csTradeMonth) {
+            record.cost_usd_50 = getCellValue(row, 'Costs');
+            record.hedge_usc_lb = getCellValue(row, 'Hedge(USC/LB)');
+            record.diff_usc_lb = getCellValue(row, 'Diff(USC/LB)');
+            record.trade_month = typeof csTradeMonth === 'number' ? convertDateToTradeMonth(csTradeMonth) : csTradeMonth;
+        } else {
+            let matchFound = false;
+            // Tier 1: DS Sheets
+            for (const psSheet of processedPurchaseData.ds_sheets) {
+                const psTradeMonth = convertDateToTradeMonth(psSheet.date);
+                for (const batchItem of psSheet.batch_list) {
+                    const psMark = String(batchItem.mark || '').toUpperCase();
+                    const psGrade = String(batchItem.grade || '').toUpperCase();
+                    if (psMark.includes(csOutturn) && psGrade === csGrade) {
+                        record.cost_usd_50 = batchItem.cost;
+                        record.diff_usc_lb = batchItem.differential;
+                        record.hedge_usc_lb = psSheet.hegde_level;
+                        record.trade_month = psTradeMonth;
+                        matchFound = true;
+                        break;
+                    }
+                }
+                if (matchFound) break;
+            }
+            // Tier 2: Database Sheet
+            if (!matchFound && processedPurchaseData.database_sheet) {
+                for (const dbItem of processedPurchaseData.database_sheet.database_batch_list) {
+                    const dbLot = String(dbItem.lot || '').toUpperCase();
+                    const dbGrade = String(dbItem.grade || '').toUpperCase();
+                    if (dbLot === csLotNumber && dbGrade === csGrade) {
+                        record.cost_usd_50 = dbItem.price;
+                        record.hedge_usc_lb = dbItem.market_level;
+                        record.diff_usc_lb = dbItem.differential;
+                        record.certification = dbItem.cert;
+                        matchFound = true;
+                        break;
+                    }
+                }
+            }
+        }
+        records.push(record);
+    }
+    return records;
+}
+
+export async function aggregatePurchaseData(files: File[]): Promise<ProcessedPurchaseFile> {
+    const finalData: ProcessedPurchaseFile = { ds_sheets: [], database_sheet: null };
+    for (const file of files) {
+        if (!file.name.match(/\.xls(x)?$/)) continue;
+        try {
+            const buffer = await readFileAsArrayBuffer(file);
+            const fileData = processPurchaseFileContent(buffer, file.name);
+            finalData.ds_sheets.push(...fileData.ds_sheets);
+            if (!finalData.database_sheet && fileData.database_sheet) {
+                finalData.database_sheet = fileData.database_sheet;
+            }
+        } catch (error) { console.error(`Error processing ${file.name}`, error); }
+    }
+    return finalData;
 }
