@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { query } from "@/lib/stock_movement_db"; 
 import { RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { CurrentStockRow, DailyGradeActivity, DailyOutbound, DailyStrategyActivity, GdiRow, GradeAdjustmentTotals, GradeInboundTotals, GradeOutboundTotals, GradeProcessingTotals, InitializedActivityRecords, InstructedBatch, OutboundRow, PreviousClosingStock, ProcessDetails, ProcessingAnalysisRow, ProcessSummary, StaRow, StiRow, StockData, StockRow, StockSummary, StockTransferInstruction, StrategyAdjustmentTotals, StrategyInboundTotals, StrategyOutboundTotals, StrategyProcessingTotals, StrategyRow, UndefinedRow } from '@/custom_utilities/custom_types';
-import * as ExcelJS from 'exceljs';
+
 
 
 
