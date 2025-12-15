@@ -634,6 +634,9 @@ function ProcessDetailsView({ process, onClose }: { process: DailyProcess; onClo
                                 <tr>
                                     <th className="py-1 px-2">Batch #</th>
                                     <th className="py-1 px-2">Strategy</th>
+                                    <th className="py-1 px-2 text-right">Hedge</th>
+                                    <th className="py-1 px-2 text-right">Diff</th>
+                                    <th className="py-1 px-2 text-right">OutR($/50)</th>
                                     <th className="py-1 px-2 text-right">Qty</th>
                                     <th className="py-1 px-2 text-right">Loss/Gain</th>
                                 </tr>
@@ -643,6 +646,9 @@ function ProcessDetailsView({ process, onClose }: { process: DailyProcess; onClo
                                     <tr key={b.id}>
                                         <td className="py-1.5 px-2 font-mono text-[#007680] max-w-[100px] truncate" title={b.batch_number}>{b.batch_number}</td>
                                         <td className="py-1.5 px-2 text-[#51534a]">{b.strategy}</td>
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.input_hedge_level_usc_lb))}</td>
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.input_differential))}</td>
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.input_cost_usd_50))}</td>
                                         <td className="py-1.5 px-2 text-right font-medium">{formatNumber(b.input_qty as number, 0)}</td>
                                         <td className={`py-1.5 px-2 text-right font-medium ${Number(b.processing_loss_gain_qty) >= 0 ? 'text-[#97D700]' : 'text-[#B9975B]'}`}>
                                             {Number(b.processing_loss_gain_qty) > 0 ? '+' : ''}{formatNumber(Number(b.processing_loss_gain_qty), 2)}
@@ -705,8 +711,13 @@ function ProcessDetailsView({ process, onClose }: { process: DailyProcess; onClo
                                 <tr>
                                     <th className="py-1 px-2">Batch #</th>
                                     <th className="py-1 px-2">Strategy</th>
+                                    {/* Added Columns */}
+                                    <th className="py-1 px-2 text-right">Hedge</th>
+                                    
+                                    <th className="py-1 px-2 text-right">Diff</th>
                                     <th className="py-1 px-2 text-right">Qty</th>
-                                    <th className="py-1 px-2 text-right">Loss/Gain</th>
+                                    <th className="py-1 px-2 text-right">OutR($/50)</th>
+                                    {/* <th className="py-1 px-2 text-right">Loss/Gain</th> */}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#F5F5F3]">
@@ -714,13 +725,17 @@ function ProcessDetailsView({ process, onClose }: { process: DailyProcess; onClo
                                     <tr key={b.id}>
                                         <td className="py-1.5 px-2 font-mono text-[#B9975B] max-w-[100px] truncate" title={b.batch_number}>{b.batch_number}</td>
                                         <td className="py-1.5 px-2 text-[#51534a]">{b.strategy}</td>
+                                        {/* Added Data Cells */}
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.output_hedge_level_usc_lb))}</td>
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.output_differential))}</td>
+                                        <td className="py-1.5 px-2 text-right font-mono text-[#968C83]">{formatNumber(Number(b.output_cost_usd_50))}</td>
                                         <td className="py-1.5 px-2 text-right font-medium">{formatNumber(b.output_qty as number, 0)}</td>
-                                        <td className={`py-1.5 px-2 text-right font-medium ${Number(b.processing_loss_gain_qty) >= 0 ? 'text-[#97D700]' : 'text-[#B9975B]'}`}>
+                                        {/* <td className={`py-1.5 px-2 text-right font-medium ${Number(b.processing_loss_gain_qty) >= 0 ? 'text-[#97D700]' : 'text-[#B9975B]'}`}>
                                             {Number(b.processing_loss_gain_qty) > 0 ? '+' : ''}{formatNumber(Number(b.processing_loss_gain_qty), 2)}
-                                        </td>
+                                        </td> */}
                                     </tr>
                                 ))}
-                                {outputBatches.length === 0 && <tr><td colSpan={4} className="py-4 text-center text-[#968C83] italic">No output batch details</td></tr>}
+                                {outputBatches.length === 0 && <tr><td colSpan={7} className="py-4 text-center text-[#968C83] italic">No output batch details</td></tr>}
                             </tbody>
                         </table>
                       </div>

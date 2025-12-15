@@ -963,7 +963,7 @@ const FileUploadModal = ({ onClose }: { onClose: () => void }) => {
         
         {/* --- NEW: Failed Batches Modal Overlay --- */}
         {showFailedBatches && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[2px]">
+            <div className="absolute h-[40%] inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[2px] overflow-scroll">
                 <div className="bg-white p-6 rounded-lg shadow-xl border border-red-200 max-w-md w-full animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
                     <div className="flex flex-col items-center text-center gap-3 mb-4">
                         <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600">

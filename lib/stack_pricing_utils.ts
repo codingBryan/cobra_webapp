@@ -25,6 +25,7 @@ const STRATEGY_VALOS: Record<string, number> = {
     "REJECTS": -270.0,
     "MBUNIS": -25.0,
     "GRINDER BOLD": -25.0, 
+    "GRINDER RC": 0, 
     "GRINDER LIGHT": -70.0,
 };
 
@@ -67,6 +68,9 @@ const STRATEGY_MAPPING: Record<string, string[]> = {
     ],
     "GRINDER BOLD": [
         "PRE GRINDER BOLD", "IN GRINDER BOLD", "POST GRINDER BOLD", "FINISHED GRINDER BOLD", "FINISHED GRINDER ", "GRINDER BOLD", "FINISHED GRINDER", "GRINDERS "
+    ],
+    "GRINDER RC": [
+     "IN GRINDER RECOVERABLE", "PRE GRINDER RECOVERABLE"
     ],
     "GRINDER LIGHT": [
         "PRE GRINDER LIGHT", "IN GRINDER LIGHT", "POST GRINDER LIGHT", "FINISHED GRINDER LIGHT"
@@ -134,7 +138,6 @@ interface CatalogueSummaryRow extends RowDataPacket {
     hedge_usc_lb: number | null;
     diff_usc_lb: number | null;
 }
-
 
 
 
@@ -720,346 +723,6 @@ interface StackProcessingBatch {
  * 3. Calculates weighted averages and updates DB.
  * 4. Reactivates batches in daily_strategy_processing.
  */
-// export async function process_post_stack_updates(currentStockFile: File): Promise<void> {
-//     console.log(`[STACK UPDATE] Starting processing for file: ${currentStockFile.name}`);
-//     const todayDate = formatDateAsLocal_YYYYMMDD(new Date());
-
-//     // --- 0. INITIAL CLEANUP: Archive ALL currently active batches ---
-//     try {
-//         console.log("[STACK UPDATE] 0. Archiving ALL currently active batches...");
-//         await query<ResultSetHeader>({
-//             query: `UPDATE daily_strategy_processing SET batch_status = 'archived' WHERE batch_status = 'active'`
-//         });
-//     } catch (error) {
-//         console.error("[STACK UPDATE] Critical Error archiving initial batches:", error);
-//         return; 
-//     }
-
-//     let rawStockData: CurrentStockRow[] = [];
-    
-//     // --- 1. Read File ---
-//     try {
-//         const buffer = await currentStockFile.arrayBuffer();
-//         const workbook = XLSX.read(buffer, { type: 'buffer' });
-//         const sheetName = workbook.SheetNames[0]; 
-//         const worksheet = workbook.Sheets[sheetName];
-//         const range = 0; 
-
-//         rawStockData = XLSX.utils.sheet_to_json<CurrentStockRow>(worksheet, { range });
-//     } catch (error) {
-//         console.error("[STACK UPDATE] Failed to read or parse file:", error);
-//         return;
-//     }
-
-//     // --- 2. Filter & Grouping Logic ---
-    
-//     // Step A: Keep ANY row that has a strategy allocation string
-//     const targetBatches = rawStockData.filter(row => 
-//         row['Position Strategy Allocation']?.trim()
-//     );
-
-//     console.log(`[STACK UPDATE] Found ${targetBatches.length} total batches to process.`);
-
-//     // Step B: Bucket them into Stacks
-//     const groupedStacks = targetBatches.reduce((acc, row) => {
-//         const rawAlloc = row['Position Strategy Allocation']?.toUpperCase().trim();
-//         if (!rawAlloc) return acc;
-
-//         const VALID_PREFIXES = ['POST', 'IN', 'PRE', 'FINISHED'];
-//         let stackType = 'OLD'; 
-
-//         if (VALID_PREFIXES.some(prefix => rawAlloc.startsWith(prefix))) {
-//             stackType = rawAlloc;
-//         }
-
-//         if (!acc[stackType]) acc[stackType] = [];
-//         acc[stackType].push(row);
-        
-//         return acc;
-//     }, {} as Record<string, CurrentStockRow[]>);
-
-
-//     // --- OPTIMIZATION: Pre-fetch Trade Variables ---
-//     const uniqueBatchNumbers = [...new Set(targetBatches
-//         .map(b => b['Batch No.']?.toUpperCase().trim())
-//         .filter(b => b)
-//     )];
-
-//     const catalogueMap = new Map<string, any>();
-//     const dailyStrategyMap = new Map<string, any>();
-
-//     if (uniqueBatchNumbers.length > 0) {
-//         const CHUNK_SIZE = 2000;
-//         for (let i = 0; i < uniqueBatchNumbers.length; i += CHUNK_SIZE) {
-//             const chunk = uniqueBatchNumbers.slice(i, i + CHUNK_SIZE);
-            
-//             // A. Fetch from Catalogue Summary
-//             try {
-//                 const catResults = await query<any[]>({
-//                     query: `SELECT batch_number, diff_usc_lb, cost_usd_50, hedge_usc_lb 
-//                             FROM catalogue_summary 
-//                             WHERE batch_number IN (?)`,
-//                     values: [chunk]
-//                 });
-//                 if(catResults) {
-//                     catResults.forEach(row => catalogueMap.set(row.batch_number.toUpperCase(), row));
-//                 }
-//             } catch (err) { console.error(err); }
-
-//             // B. Fetch from Daily Strategy Processing
-//             try {
-//                 const dailyResults = await query<any[]>({
-//                     query: `SELECT batch_number, output_differential, output_cost_usd_50, output_hedge_level_usc_lb, strategy 
-//                             FROM daily_strategy_processing 
-//                             WHERE batch_number IN (?) AND output_qty > 0 
-//                             ORDER BY id DESC`, 
-//                     values: [chunk]
-//                 });
-//                 if (dailyResults) {
-//                     dailyResults.forEach(row => {
-//                         if(!dailyStrategyMap.has(row.batch_number.toUpperCase())) {
-//                             dailyStrategyMap.set(row.batch_number.toUpperCase(), row);
-//                         }
-//                     });
-//                 }
-//             } catch (err) { console.error(err); }
-//         }
-//     }
-
-//     // --- 3. Process Each Grouping (Stack) ---
-//     const skippedBatchesForReport: FailedBatchReport[] = []; 
-
-//     for (const [stackType, batches] of Object.entries(groupedStacks)) {
-//         console.log(`[STACK UPDATE] Processing Stack Type: ${stackType} (${batches.length} batches)`);
-        
-//         let shouldSkipGroup = false;
-//         const calculatedBatches: CalculatedBatch[] = [];
-//         const potentialFailingBatches: FailedBatchReport[] = []; 
-        
-//         // --- NEW: Track unique batches in this stack to prevent duplicates ---
-//         const seenBatchNumbers = new Set<string>();
-
-//         // --- 3a. Sourcing and Validation ---
-//         for (const batch of batches) {
-//             const batchNumber = batch['Batch No.']?.toUpperCase().trim();
-//             const quantity = Number(batch['Qty.']);
-//             let skipReason = '';
-
-//             if (!batchNumber || !Number.isFinite(quantity) || quantity <= 0) {
-//                 skipReason = 'Invalid Batch Number or Quantity in input file.';
-//                 skippedBatchesForReport.push({ 
-//                     'Stack Type': stackType, 
-//                     'Batch No.': batch['Batch No.'] || 'N/A', 
-//                     'Quantity': batch['Qty.'], 
-//                     'Reason For Skip': skipReason 
-//                 });
-//                 continue; 
-//             }
-
-//             // --- DUPLICATE CHECK START ---
-//             if (seenBatchNumbers.has(batchNumber)) {
-//                 console.warn(`[${stackType}] Skipping duplicate batch ${batchNumber} found in input file.`);
-//                 continue;
-//             }
-//             seenBatchNumbers.add(batchNumber);
-//             // --- DUPLICATE CHECK END ---
-
-//             let diff: number | null = null;
-//             let price: number | null = null;
-//             let hedge_level: number | null = null;
-//             let strategy: string | null = null;
-
-//             if (catalogueMap.has(batchNumber)) {
-//                 const catData = catalogueMap.get(batchNumber);
-//                 diff = catData.diff_usc_lb;
-//                 price = catData.cost_usd_50;
-//                 hedge_level = catData.hedge_usc_lb;
-//                 strategy = dailyStrategyMap.get(batchNumber)?.strategy || stackType; 
-//             } else if (dailyStrategyMap.has(batchNumber)) {
-//                 const dailyData = dailyStrategyMap.get(batchNumber);
-//                 diff = dailyData.output_differential;
-//                 price = dailyData.output_cost_usd_50;
-//                 hedge_level = dailyData.output_hedge_level_usc_lb;
-//                 strategy = dailyData.strategy;
-//             }
-
-//             if (diff === null || price === null || !Number.isFinite(Number(diff)) || !Number.isFinite(Number(price))) {
-//                 skipReason = 'Missing/Invalid trade variables.';
-//                 potentialFailingBatches.push({ 
-//                     'Stack Type': stackType, 
-//                     'Batch No.': batchNumber, 
-//                     'Quantity': quantity, 
-//                     'Reason For Skip': skipReason 
-//                 });
-//                 shouldSkipGroup = true; 
-//                 continue; 
-//             }
-
-//             calculatedBatches.push({
-//                 batch_number: batchNumber,
-//                 quantity: quantity,
-//                 diff_usc_lb: Number(diff),
-//                 hedge_level: Number(hedge_level || 0),
-//                 price_usd_50: Number(price),
-//                 stack_type: stackType,
-//                 strategy: strategy || stackType 
-//             });
-//         }
-        
-//         if (shouldSkipGroup) {
-//             skippedBatchesForReport.push(...potentialFailingBatches);
-//             console.log(`[${stackType}] Skipped grouping due to missing trade data in ${potentialFailingBatches.length} batch(es).`);
-//             continue; 
-//         }
-
-//         // --- 3b. Weighted Average Calculation ---
-//         const totalQty = calculatedBatches.reduce((sum, b) => sum + b.quantity, 0);
-
-//         if (totalQty === 0) {
-//              console.error(`[${stackType}] Skipping grouping: Total quantity is zero.`);
-//              continue;
-//         }
-
-//         const weightedDiffSum = calculatedBatches.reduce((sum, b) => sum + (b.quantity * b.diff_usc_lb), 0);
-//         const weightedPriceSum = calculatedBatches.reduce((sum, b) => sum + (b.quantity * b.price_usd_50), 0);
-
-//         let stackDiff = weightedDiffSum / totalQty;
-//         let stackPrice = weightedPriceSum / totalQty;
-        
-//         if (!Number.isFinite(stackDiff) || !Number.isFinite(stackPrice)) {
-//             console.error(`[${stackType}] Skipping grouping: Calculated weighted averages resulted in invalid numbers.`);
-//             continue;
-//         }
-
-//         // --- 4. Database Transaction: Find/Create Post Stack ---
-//         let postStack: PostStackRow | null = null;
-//         const existingStack = await query<PostStackRow[]>({
-//             query: `SELECT * FROM post_stack WHERE stack_type = ? LIMIT 1`,
-//             values: [stackType],
-//         });
-
-//         if (existingStack && existingStack.length > 0) {
-//             postStack = existingStack[0];
-//             await query<ResultSetHeader>({
-//                 query: `UPDATE post_stack SET diff_usc_lb = ?, quantity = ?, price_usd_50 = ? WHERE id = ?`,
-//                 values: [stackDiff, totalQty, stackPrice, postStack.id],
-//             });
-//             console.log(`[${stackType}] Updated existing post_stack ID: ${postStack.id}`);
-//         } else {
-//             const newStackResult = await query<ResultSetHeader>({
-//                 query: `INSERT INTO post_stack (date, stack_type, diff_usc_lb, quantity, price_usd_50) VALUES (?, ?, ?, ?, ?)`,
-//                 values: [todayDate, stackType, stackDiff, totalQty, stackPrice],
-//             });
-//             if (newStackResult && newStackResult.insertId) {
-//                 postStack = { id: newStackResult.insertId } as PostStackRow;
-//                 console.log(`[${stackType}] Created new post_stack ID: ${postStack.id}`);
-//             }
-//         }
-
-//         if (!postStack) {
-//              console.error(`[${stackType}] Critical error: Failed to find or create post_stack record.`);
-//              continue;
-//         }
-//         const stackId = postStack.id;
-
-//         // --- 4b. Create/Override Post Stack History ---
-//         const existingHistory = await query<RowDataPacket[]>({
-//             query: `SELECT id FROM post_stack_history WHERE stack_id = ? AND date = ? LIMIT 1`,
-//             values: [stackId, todayDate],
-//         });
-        
-//         if (existingHistory && existingHistory.length > 0) {
-//             await query<ResultSetHeader>({
-//                 query: `UPDATE post_stack_history SET diff_usc_lb = ?, quantity = ?, price_usd_50 = ? WHERE id = ?`,
-//                 values: [stackDiff, totalQty, stackPrice, existingHistory[0].id],
-//             });
-//         } else {
-//             await query<ResultSetHeader>({
-//                 query: `INSERT INTO post_stack_history (date, stack_id, diff_usc_lb, quantity, price_usd_50) VALUES (?, ?, ?, ?, ?)`,
-//                 values: [todayDate, stackId, stackDiff, totalQty, stackPrice],
-//             });
-//         }
-
-//         // --- 4c. Update Post Stack Batches ---
-//         // 1. DELETE existing batches for this stack (clears the way)
-//         await query<ResultSetHeader>({
-//             query: `DELETE FROM post_stack_batches WHERE stack_id = ?`,
-//             values: [stackId],
-//         });
-
-//         const batchInsertValues = calculatedBatches.map(batch => [
-//             stackId,
-//             batch.batch_number,
-//             batch.diff_usc_lb, 
-//             batch.hedge_level,
-//             batch.quantity,
-//             batch.price_usd_50, 
-//         ]);
-
-//         if (batchInsertValues.length > 0) {
-//             // 2. INSERT unique batches (deduplicated by 'seenBatchNumbers' above)
-//             // Use INSERT IGNORE as a final safety net for race conditions, though specific unique check above handles 99% cases
-//             await query<ResultSetHeader>({
-//                 query: `INSERT IGNORE INTO post_stack_batches (stack_id, batch_number, diff_usc_lb, hedge_level, quantity, price_usd_50) VALUES ?`,
-//                 values: [batchInsertValues], 
-//             });
-//              console.log(`[${stackType}] Inserted ${batchInsertValues.length} new post_stack_batches.`);
-//         }
-//     }
-
-//     // --- 5. Save Skipped Batches Report ---
-//     if (skippedBatchesForReport.length > 0) {
-//         const dateString = formatDateAsLocal_YYYYMMDD(new Date());
-//         const filename = `post_batches_stinking_${dateString}.xlsx`;
-//         const sheetName = "Skipped Batches";
-//         await saveXLSX(skippedBatchesForReport, filename, sheetName);
-//         console.warn(`[STACK UPDATE REPORT] Skipped batch report saved successfully to ${filename}.`);
-//     } else {
-//         console.log("[STACK UPDATE REPORT] No batches caused group skips. No report generated.");
-//     }
-
-//     // --- 6. BATCH STATUS UPDATE (OPTIMIZED) ---
-//     console.log("[STACK UPDATE] Starting Batch Status Reactivation...");
-
-//     try {
-//         const allFileBatchNumbers = [...new Set(rawStockData
-//             .map(row => row['Batch No.']?.toUpperCase().trim())
-//             .filter(b => b)
-//         )];
-
-//         if (allFileBatchNumbers.length > 0) {
-//             console.log(`[STACK UPDATE] Processing ${allFileBatchNumbers.length} unique batches from file for reactivation.`);
-            
-//             const CHUNK_SIZE = 2000;
-//             let totalUpdated = 0;
-
-//             for (let i = 0; i < allFileBatchNumbers.length; i += CHUNK_SIZE) {
-//                 const chunk = allFileBatchNumbers.slice(i, i + CHUNK_SIZE);
-                
-//                 const result = await query<ResultSetHeader>({
-//                     query: `UPDATE daily_strategy_processing 
-//                             SET batch_status = 'active' 
-//                             WHERE batch_number IN (?) 
-//                             AND output_qty > 0`,
-//                     values: [chunk]
-//                 });
-                
-//                 if (result && result.affectedRows) {
-//                     totalUpdated += result.affectedRows;
-//                 }
-//             }
-//             console.log(`[STACK UPDATE] Successfully reactivated ${totalUpdated} batches.`);
-//         } else {
-//             console.log("[STACK UPDATE] No valid batch numbers found in file to reactivate.");
-//         }
-
-//     } catch (error) {
-//         console.error("[STACK UPDATE] Error during batch status update:", error);
-//     }
-
-//     console.log("[STACK UPDATE] Finished processing all strategy stacks and status updates.");
-// }
-
 export async function process_post_stack_updates(currentStockFile: File): Promise<void> {
     console.log(`[STACK UPDATE] Starting processing for file: ${currentStockFile.name}`);
     const todayDate = formatDateAsLocal_YYYYMMDD(new Date());
@@ -1492,8 +1155,6 @@ export async function get_history_batch(batch_number: string): Promise<Batch | n
 }
 
 
-
-
 interface SaleRecordExcelRow {
     'No.': number | string;
     'Qty.': number | string;
@@ -1533,7 +1194,6 @@ export async function process_sale_record(file: File): Promise<void> {
         const workbook = XLSX.read(buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-
         // Set range to 1 to skip the first row (0-indexed) and use the second row as header
         excelData = XLSX.utils.sheet_to_json<SaleRecordExcelRow>(worksheet, { range: 1 });
     } catch (error) {
@@ -1545,6 +1205,8 @@ export async function process_sale_record(file: File): Promise<void> {
         console.log("[SALE RECORD] No data found in file.");
         return;
     }
+
+     await generateStrategyReports()
 
     console.log(`[SALE RECORD] Found ${excelData.length} rows to process.`);
 
@@ -2438,3 +2100,93 @@ export async function process_sale_diff_update(file: File): Promise<void> {
     console.log(`[SALE DIFF UPDATE] Successfully updated ${updatedCount} records.`);
 }
 
+const QUERY_INPUT_NO_DIFF = `
+SELECT *
+FROM daily_strategy_processing dsp
+WHERE 
+    dsp.input_qty > 0 AND input_differential IS NULL 
+    AND NOT EXISTS (
+        SELECT 1
+        FROM daily_strategy_processing dsp2
+        WHERE dsp2.batch_number = dsp.batch_number
+          AND dsp2.output_qty > 0
+    );
+`;
+
+const QUERY_HAS_DIFF = `
+SELECT * FROM daily_strategy_processing 
+WHERE input_differential IS NOT NULL OR output_differential IS NOT NULL;
+`;
+
+/**
+ * Executes specific reporting queries and saves the results as Excel files.
+ * @returns An object containing the paths of the generated files.
+ */
+export async function generateStrategyReports() {
+    try {
+        console.log("[REPORT] Starting report generation...");
+
+        // 1. Execute Queries in Parallel
+        const [inputNoDiffResults, hasDiffResults] = await Promise.all([
+            query<RowDataPacket[]>({ query: QUERY_INPUT_NO_DIFF }),
+            query<RowDataPacket[]>({ query: QUERY_HAS_DIFF })
+        ]);
+
+        // 2. Prepare Directory
+        const reportDir = path.join(process.cwd(), 'generated_reports');
+        
+        // FIX: Using fs.existsSync and fs.mkdirSync from the standard 'fs' module
+        if (!fs_node.existsSync(reportDir)) {
+            fs_node.mkdirSync(reportDir, { recursive: true });
+        }
+
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14); // YYYYMMDDHHMMSS
+        const filesGenerated: string[] = [];
+
+        // 3. Helper to save data to Excel
+        const saveToExcel = (data: any[], fileName: string) => {
+            if (!data || data.length === 0) {
+                console.warn(`[REPORT] No data found for ${fileName}. Skipping file generation.`);
+                return null;
+            }
+
+            const workbook = XLSX.utils.book_new();
+            const worksheet = XLSX.utils.json_to_sheet(data);
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Report Data");
+
+            const filePath = path.join(reportDir, fileName);
+            
+            // FIX: Generate buffer manually and write using fs_node to avoid internal library file access issues
+            const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+            fs_node.writeFileSync(filePath, buffer);
+            
+            console.log(`[REPORT] Saved: ${filePath}`);
+            return filePath;
+        };
+
+        // 4. Generate Files
+        // Report 1: Inputs with No Differential and No Output Match
+        const file1 = saveToExcel(
+            inputNoDiffResults || [], 
+            `missing_differential_inputs_${timestamp}.xlsx`
+        );
+        if (file1) filesGenerated.push(file1);
+
+        // Report 2: Records with Any Differential Present
+        const file2 = saveToExcel(
+            hasDiffResults || [], 
+            `existing_differentials_${timestamp}.xlsx`
+        );
+        if (file2) filesGenerated.push(file2);
+
+        return {
+            success: true,
+            files: filesGenerated,
+            message: `Successfully generated ${filesGenerated.length} reports in ${reportDir}`
+        };
+
+    } catch (error) {
+        console.error("[REPORT] Critical error generating reports:", error);
+        throw error;
+    }
+}
